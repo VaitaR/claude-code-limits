@@ -3,6 +3,9 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { fmtAt, fmtLeft, gaugeCells, lastRequestAt, mergeLimits, parseConfig, parseCostSplit, quotaLevel, splitLines } from '../hooks/core'
 
+// The type lib is es2023 alone; the test runtime has timers.
+declare function setTimeout(fn: (value?: unknown) => void, ms: number): unknown
+
 // A terminal runs a hover's rows on as one line, joined by ` · `: there a row is a part of that line.
 const hoverRow = (surface: string, re: RegExp) =>
   surface === 'terminal' ? new RegExp(`(?:^| · )${re.source.replace(/^\^|\$$/g, '')}(?: · |$)`) : re
@@ -11,9 +14,9 @@ const hoverRow = (surface: string, re: RegExp) =>
 
 test('config is read leniently: bad values fall back to defaults', () => {
   expect(parseConfig({})).toEqual({ palette: 'theme', costCommand: [], cacheTtlMs: 3_600_000 })
-  expect(parseConfig({ palette: 'pastel', costCommand: '  python3   /x/session_cost.py ', cacheTtl: '5m' })).toEqual({
+  expect(parseConfig({ palette: 'pastel', costCommand: '  python3   /x/cost.py ', cacheTtl: '5m' })).toEqual({
     palette: 'pastel',
-    costCommand: ['python3', '/x/session_cost.py'],
+    costCommand: ['python3', '/x/cost.py'],
     cacheTtlMs: 300_000,
   })
   expect(parseConfig({ palette: 7, costCommand: null, cacheTtl: 'forever' })).toEqual(parseConfig({}))
@@ -37,7 +40,7 @@ test('a reading without a window keeps the last one until it resets', () => {
   expect(mergeLimits([h5, d7], [], 6_000)).toEqual([d7]) // the 5h window reset: its old reading is gone
 })
 
-test('a cost split reads session_cost.py output and names the costliest agents', () => {
+test('a cost split reads costCommand output and names the costliest agents', () => {
   const out = JSON.stringify({
     total_usd: 5.85, main_usd: 5.75, unpriced_calls: 0,
     agents: [
@@ -117,11 +120,11 @@ test('the band shows quotas, context and cache, running agents at the right, and
     sent.push(e.text)
     return { value: undefined }
   })
-  on('command.register', () => ({ value: undefined }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   const H = 3_600_000
   on('session.usage', () => ({
     value: {
+      startedAt: 0,
       context: { tokens: 120_000, window: 200_000, percent: 60 },
       cost: { usd: 1 },
       rateLimits: [
@@ -131,7 +134,7 @@ test('the band shows quotas, context and cache, running agents at the right, and
     },
   }))
   on('session.repo', () => ({ value: { root: '/w/r', remote: null, internal: false, name: null } }))
-  on('process.run', (_$, e) => ({ value: { exitCode: 0, stderr: '', stdout: e.argv.includes('status') ? '## main\n M a.py\n' : '' } }))
+  on('process.run', (_$, e) => ({ value: { exitCode: 0, stderr: '', isStdoutTruncated: false, isStderrTruncated: false, stdout: e.argv.includes('status') ? '## main\n M a.py\n' : '' } }))
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'b1' }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
@@ -162,7 +165,6 @@ test('the band shows a live cache as a dot and minutes, cold once the TTL passes
   const clock = mock.clock(on)
   await clock.advance(60_000)
   on('ui.status', () => ({ value: undefined }))
-  on('command.register', () => ({ value: undefined }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('classic.UserPromptSubmit', () => ({}))
   on('turn.step', async function* (_$, e) {
@@ -209,7 +211,7 @@ test('a measurement without rate limits leaves the band quotas in place', async 
 test('the band shows the session cost, and its hover adds what the last turn cost', async ($, on) => {
   engine(on)
   let usd = 2
-  on('session.usage', () => ({ value: { context: { tokens: 1_000, window: 200_000, percent: 1 }, cost: { usd }, rateLimits: [] } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 1_000, window: 200_000, percent: 1 }, cost: { usd }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   await $.turn.start({ text: 'go', turnId: 'C1' })
   usd = 2.84
@@ -223,22 +225,22 @@ test('the band shows the session cost, and its hover adds what the last turn cos
   }
 })
 
-test('with a cost command, the cost hover splits the session by main thread and subagent', { options: { costCommand: 'python3 /x/session_cost.py' } }, async ($, on) => {
+test('with a cost command, the cost hover splits the session by main thread and subagent', { options: { costCommand: 'python3 /x/cost.py' } }, async ($, on) => {
   engine(on)
   const argvs: string[][] = []
   on('session.id', () => ({ value: 'S-1' }))
-  on('session.usage', () => ({ value: { context: { tokens: 1_000, window: 200_000, percent: 1 }, cost: { usd: 5.85 }, rateLimits: [] } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 1_000, window: 200_000, percent: 1 }, cost: { usd: 5.85 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('process.run', (_$, e) => {
     argvs.push([...e.argv])
     const stdout = e.argv[0] === 'python3' ? JSON.stringify({ total_usd: 5.85, main_usd: 5.75, unpriced_calls: 0, agents: [{ agent_type: 'Explore', description: 'map', usd: 0.1 }] }) : ''
-    return { value: { exitCode: 0, stderr: '', stdout } }
+    return { value: { exitCode: 0, stderr: '', isStdoutTruncated: false, isStderrTruncated: false, stdout } }
   })
   await $.session.measure({ context: { tokens: 1_000, window: 200_000, percent: 1 }, cost: { usd: 5.85 }, rateLimits: [], changed: ['cost'] })
   await $.turn.start({ text: 'go', turnId: 'K1' })
   await $.turn.complete({ turnId: 'K1', reason: 'answer', answer: 'ok', durationMs: 1 } as never)
   for (let i = 0; i < 20 && argvs.length === 0; i++) await Promise.resolve()
-  expect(argvs).toContainEqual(['python3', '/x/session_cost.py', 'S-1'])
+  expect(argvs).toContainEqual(['python3', '/x/cost.py', 'S-1'])
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...band(120), surface })
     for (const text of [/^session \$5\.85 at API prices$/, /^\$5\.75 main$/, /^\$0\.10 Explore · map$/]) expect([surface, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, String(text), expect.anything()])
@@ -248,16 +250,16 @@ test('with a cost command, the cost hover splits the session by main thread and 
 
 const SPLIT = JSON.stringify({ total_usd: 5.85, main_usd: 5.75, unpriced_calls: 0, agents: [{ agent_type: 'Explore', description: 'map', usd: 0.1 }] })
 
-test('an end that lands while the cost command runs queues one more run', { options: { costCommand: 'python3 /x/session_cost.py' } }, async ($, on) => {
+test('an end that lands while the cost command runs queues one more run', { options: { costCommand: 'python3 /x/cost.py' } }, async ($, on) => {
   engine(on)
   on('session.id', () => ({ value: 'S-1' }))
   let runs = 0
   let release = () => {}
   on('process.run', async (_$, e) => {
-    if (e.argv[0] !== 'python3') return { value: { exitCode: 0, stderr: '', stdout: '' } }
+    if (e.argv[0] !== 'python3') return { value: { exitCode: 0, stderr: '', isStdoutTruncated: false, isStderrTruncated: false, stdout: '' } }
     runs++
     if (runs === 1) await new Promise<void>(r => (release = r))
-    return { value: { exitCode: 0, stderr: '', stdout: SPLIT } }
+    return { value: { exitCode: 0, stderr: '', isStdoutTruncated: false, isStderrTruncated: false, stdout: SPLIT } }
   })
   await $.turn.start({ text: 'go', turnId: 'Q1' })
   await $.turn.complete({ turnId: 'Q1', reason: 'answer', answer: 'ok', durationMs: 1 } as never)
@@ -270,16 +272,16 @@ test('an end that lands while the cost command runs queues one more run', { opti
   expect(runs).toBe(2)
 })
 
-test('a clear drops the previous session cost split', { options: { costCommand: 'python3 /x/session_cost.py' } }, async ($, on) => {
+test('a clear drops the previous session cost split', { options: { costCommand: 'python3 /x/cost.py' } }, async ($, on) => {
   engine(on)
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('session.id', () => ({ value: 'S-1' }))
-  on('session.usage', () => ({ value: { context: { tokens: 1_000, window: 200_000, percent: 1 }, cost: { usd: 5.85 }, rateLimits: [] } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 1_000, window: 200_000, percent: 1 }, cost: { usd: 5.85 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   let runs = 0
   on('process.run', (_$, e) => {
     if (e.argv[0] === 'python3') runs++
-    return { value: { exitCode: 0, stderr: '', stdout: e.argv[0] === 'python3' ? SPLIT : '' } }
+    return { value: { exitCode: 0, stderr: '', isStdoutTruncated: false, isStderrTruncated: false, stdout: e.argv[0] === 'python3' ? SPLIT : '' } }
   })
   await $.session.measure({ context: { tokens: 1_000, window: 200_000, percent: 1 }, cost: { usd: 5.85 }, rateLimits: [], changed: ['cost'] })
   await $.turn.start({ text: 'go', turnId: 'K1' })
@@ -343,7 +345,6 @@ test('a mod loaded mid-session starts the cache clock from the transcript, not c
   const sent = Date.parse('2026-10-09T03:05:01.000Z')
   await clock.advance(sent + 10 * 60_000)
   on('ui.status', () => ({ value: undefined }))
-  on('command.register', () => ({ value: undefined }))
   on('session.usage', () => { throw new Error('no usage') })
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.repo', () => ({ value: null }))
@@ -351,7 +352,7 @@ test('a mod loaded mid-session starts the cache clock from the transcript, not c
   let argv: readonly string[] = []
   on('process.run', (_$, e) => {
     argv = e.argv
-    return { value: { exitCode: 0, stderr: '', stdout: ['x', row({ type: 'user', timestamp: '2026-10-09T03:05:01.000Z' }), reply('m2', '2026-10-09T03:05:20.000Z')].join('\n') } }
+    return { value: { exitCode: 0, stderr: '', isStdoutTruncated: false, isStderrTruncated: false, stdout: ['x', row({ type: 'user', timestamp: '2026-10-09T03:05:01.000Z' }), reply('m2', '2026-10-09T03:05:20.000Z')].join('\n') } }
   })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })

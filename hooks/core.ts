@@ -33,7 +33,7 @@ export const listOf = <T>(stored: unknown): T[] => (Array.isArray(stored) ? (sto
 
 export type Config = {
   palette: Palette
-  /** argv the session id is appended to; it prints a session_cost.py JSON. Empty: no split. */
+  /** argv the session id is appended to; it prints the JSON the README describes. Empty: no split. */
   costCommand: string[]
   /** The prompt cache's lifetime: the engine reports no 5m/1h split, so the person names theirs. */
   cacheTtlMs: number
@@ -140,7 +140,7 @@ export const limitLabel = (kind: string) =>
 
 // ---------------------------------------------------------------- cost split
 
-/** A `session_cost.py` answer, read leniently: anything without a total is no split. */
+/** A `costCommand` answer, read leniently: anything without a total is no split. */
 export const parseCostSplit = (stdout: string, at: number): CostSplit | null => {
   let o: Record<string, unknown>
   try {
