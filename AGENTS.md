@@ -20,7 +20,7 @@ subagents. Read before changing anything:
 
 ## Done means
 
-1. `claude plugin validate .`, `claude plugin test .`, `npx -p typescript tsc -p .` all pass, tsc
+1. The three checks in [CONTRIBUTING.md](CONTRIBUTING.md) "Before a pull request" all pass, tsc
    with zero errors (tests included). Validate's one warning, that the root `CLAUDE.md` is not loaded
    as context, is expected: it is for agents working in this checkout, not for the plugin's users.
 2. A drawing change is seen live. Tests read the element tree, never the paint: overlap, clipping

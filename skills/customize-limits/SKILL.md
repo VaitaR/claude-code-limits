@@ -47,8 +47,8 @@ The command gets the session id as its last argument and must print one JSON obj
 | how a value is formatted | the `fmt*` functions in `core.ts` |
 | what state is kept | the atoms at the top of `register.tsx`, typed in `types/index.d.ts` |
 
-To hide a segment, skip its `add(…)` call. Keep the band one line: a new field must earn its width, and
-details belong in `detail`, the rows its hover shows.
+To hide a segment, skip its `add(…)` call. Keep the band one line (see
+[CONTRIBUTING.md](../../CONTRIBUTING.md)): details belong in `detail`, the rows its hover shows.
 
 ## Add a segment
 
@@ -73,15 +73,15 @@ then `ui.find({ text: /…/ })` or `ui.find({ key })`. Follow the existing tests
 
 ## Traps
 
-- **Tests check the element tree, never the paint.** Whether the line fits, or a hover is cut, shows only
-  in the app. The desktop app sets text in a proportional font, so widths counted in characters are
-  approximate: put the important part of a row first (the amount before the description).
+- **Tests check the element tree, never the paint**, so fit and clipping show only in the app. The desktop
+  app sets text in a proportional font, so widths counted in characters are approximate: put the important
+  part of a row first (the amount before the description).
 - **A hover box needs an explicit width.** Unsized, it takes its segment's width and truncates.
 - **A terminal paints in tree order and clips a hover to the band's rows.** A hover drawn inside its segment
   lay under the segments after it. So in a terminal the hovers are one row each, drawn after every segment at
   the cell the band's wrap gives them, and lit through `hover.scope`. A new segment passes its text as
   `add`'s last argument: that is how its width, and every later hover's place, is known. Check a hover change
-  in a real terminal: `tmux send-keys -l $'\e[<35;COL;ROWM'` moves the pointer, `tmux capture-pane -p` reads it.
+  in a real terminal with the tmux recipe in [AGENTS.md](../../AGENTS.md) "Done means".
 - **Never declare a variable named `on`** (or `$`, `next`) inside `register`: the module fails to load.
 - **Engine stubs in a test are registered before the first `$` call**, and must return the fields the
   event requires (a `session.end` stub returns `{ sessionId }`); the error message names the missing one.
