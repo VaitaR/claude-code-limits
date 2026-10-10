@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { fmtAt, fmtLeft, gaugeCells, lastPromptOf, lastRequestAt, mergeLimits, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
+import { fmtAt, fmtCacheLeft, fmtLeft, gaugeCells, lastPromptOf, lastRequestAt, mergeLimits, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
 
 // The type lib is es2023 alone; the test runtime has timers.
 declare function setTimeout(fn: (value?: unknown) => void, ms: number): unknown
@@ -63,6 +63,10 @@ test('a gauge shows one cell for any use, none for zero', () => {
 
 test('reset countdowns read in days, hours or minutes', () => {
   expect([fmtLeft(48 * 3_600_000), fmtLeft(2 * 3_600_000 + 5 * 60_000), fmtLeft(45 * 60_000)]).toEqual(['2d00h', '2h05m', '45m'])
+})
+
+test('the cache reads in minutes, then seconds in its last minute', () => {
+  expect([59 * 60_000 + 5, 61_000, 59_500, 42_000, 400, 0].map(fmtCacheLeft)).toEqual(['59m', '1m', '59s', '42s', '1s', 'cold'])
 })
 
 const row = (o: Record<string, unknown>) => JSON.stringify(o)

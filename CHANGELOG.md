@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- The cache counts down in seconds through its last minute, `● 42s`, where it showed `<1m`.
+
 ## 0.7.0
 
 - The band ends with your last prompt, `❯ …`: in the room the line has left and cut with `…`, or on a row of its own when less than 40 cells remain and the band has a row to spare; without one it keeps to what is left, or is left out, so the band is never folded away. Its hover shows when it was sent and the prompt in full. Only your own prompts count, never a task notification, a peer session or another plugin's. A reloaded or resumed session shows the last prompt Claude Code recorded in its transcript.

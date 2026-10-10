@@ -1,12 +1,12 @@
 // A countdown ticking on the surface's frame clock, so the cache TTL and reset times move between redraws.
 import type { ClientModule } from 'claude-code'
-import { fmtCacheMin, fmtLeft } from './core'
+import { fmtCacheLeft, fmtLeft } from './core'
 
-type Props = { until: number; now: number; kind: 'cacheMin' | 'left'; color: string; warn: string; hot: string }
+type Props = { until: number; now: number; kind: 'cache' | 'left'; color: string; warn: string; hot: string }
 type Ref = { left: number; lastNow: number }
 type State = { ref: Ref }
 
-const text = (props: Props, left: number) => (props.kind === 'left' ? fmtLeft(left) : left <= 0 ? '○ cold' : `● ${fmtCacheMin(left)}`)
+const text = (props: Props, left: number) => (props.kind === 'left' ? fmtLeft(left) : left <= 0 ? '○ cold' : `● ${fmtCacheLeft(left)}`)
 
 const Countdown: ClientModule<Props, State> = (props, surface) => {
   const { Text } = surface.elements
@@ -17,8 +17,8 @@ const Countdown: ClientModule<Props, State> = (props, surface) => {
   }
   if (surface.state === undefined) {
     surface.setState({ ref })
-    // Both forms show minutes: a tick a minute would drift, so it ticks each second but repaints
-    // only when the shown text changes.
+    // A tick a minute would drift, so it ticks each second but repaints only when the shown text
+    // changes: each minute, then each second of the cache's last one.
     surface.every(1000, () => {
       if (ref.left <= 0) return
       const was = text(props, ref.left)

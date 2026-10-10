@@ -96,8 +96,9 @@ export const fmtLeft = (ms: number) => {
   return h > 0 ? `${h}h${String(m % 60).padStart(2, '0')}m` : `${m}m`
 }
 
-/** The cache in whole minutes: glanced at, not watched. */
-export const fmtCacheMin = (ms: number) => (ms <= 0 ? 'cold' : ms < 60_000 ? '<1m' : `${Math.floor(ms / 60_000)}m`)
+/** The cache in whole minutes, then seconds in its last minute: the moment to send one more prompt. */
+export const fmtCacheLeft = (ms: number) =>
+  ms <= 0 ? 'cold' : ms < 60_000 ? `${Math.min(59, Math.ceil(ms / 1000))}s` : `${Math.floor(ms / 60_000)}m`
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 

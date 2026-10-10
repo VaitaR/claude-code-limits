@@ -1,6 +1,6 @@
 {
   "name": "limits",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Claude Code mod: your 5h/7d quota, context window, prompt-cache time left and session cost on one line above the prompt, with per-subagent cost on hover",
   "author": {
     "name": "Andrei Shivalin",

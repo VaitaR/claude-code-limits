@@ -49,7 +49,7 @@ Hovering a segment shows its details: the desktop app lists them as rows, a term
 | --- | --- | --- |
 | **`5h`** **`7d`** | how much of each rate-limit window your plan reports is used, and after `↻` the time to its reset | `5h · 21% used, 79% left · resets 18:07` |
 | **`ctx`** | context against the window Claude Code compacts at; `⟲3` after three compactions | `ctx · 31k of 258k tokens · 3 compactions` |
-| **`cache`** | `● live` while a turn runs, then `● 59m`, the minutes the prompt cache has left, and `○ cold` once it has none | `cache · warm until 16:31 (1h TTL)` |
+| **`cache`** | `● live` while a turn runs, then `● 59m`, the minutes the prompt cache has left (seconds in its last minute), and `○ cold` once it has none | `cache · warm until 16:31 (1h TTL)` |
 | **`$0.20`** | the session's cost at API prices, subagents included | `session $0.20 at API prices, subagents included`, then the last turn's cost; with a [`costCommand`](#configure), rows for the main thread and the subagents |
 | **`◐ Explore`** | the subagents running now: the type of one, `◐ 3 agents` for several | `1 subagent running · Explore` |
 | **`❯ fix the flaky…`** | your last prompt, in the room the line has left and cut with `…`; with less than 40 cells left, on a row of its own when there is room for one | `last prompt · sent 16:18`, then the prompt in full |

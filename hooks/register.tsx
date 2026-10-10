@@ -7,7 +7,7 @@ import {
   PALETTES,
   contextOf,
   fmtAt,
-  fmtCacheMin,
+  fmtCacheLeft,
   fmtLeft,
   fmtUsd,
   gaugeCells,
@@ -324,10 +324,10 @@ export const register: Register = (on, options) => {
         ) : sentAt <= 0 ? (
           <Text dimColor>○ cold</Text>
         ) : hasClient ? (
-          <els.Client key="band-cache" module="./countdown.tsx" props={{ until, now, kind: 'cacheMin', color: C.text, warn: C.amber, hot: C.warn }} />
+          <els.Client key="band-cache" module="./countdown.tsx" props={{ until, now, kind: 'cache', color: C.text, warn: C.amber, hot: C.warn }} />
         ) : (
           <Text color={until - now <= 0 ? C.warn : until - now < 5 * 60_000 ? C.amber : C.text}>
-            {until - now <= 0 ? '○ cold' : `● ${fmtCacheMin(until - now)}`}
+            {until - now <= 0 ? '○ cold' : `● ${fmtCacheLeft(until - now)}`}
           </Text>
         )}
       </Box>,
@@ -339,7 +339,7 @@ export const register: Register = (on, options) => {
           : until <= now
             ? `cache · cold since ${fmtAt(until, now)}: the next prompt rewrites it`
             : `cache · warm until ${fmtAt(until, now)} (${ttl} TTL)`,
-      `cache ${e.props.isWorking ? '● live' : sentAt <= 0 || until <= now ? '○ cold' : `● ${fmtCacheMin(until - now)}`}`,
+      `cache ${e.props.isWorking ? '● live' : sentAt <= 0 || until <= now ? '○ cold' : `● ${fmtCacheLeft(until - now)}`}`,
     )
 
     // The engine prices every response of the session, its subagents' included; on a plan it is the API-price equivalent.
