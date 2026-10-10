@@ -434,3 +434,15 @@ test('the last prompt never makes the band taller than it may be', async ($, on)
     await ui.unmount()
   }
 })
+
+test('a short prompt shows whole, even in less room than a cut one needs', async ($, on) => {
+  engine(on)
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  await $.prompt.submit(submit('ping', { kind: 'composer' }))
+  // 26 columns leave 10 cells after `cache ○ cold`: under PROMPT_FLOOR, but `❯ ping` takes 6.
+  for (const cols of [120, 26]) {
+    const ui = await $.ui.mount({ ...band(cols), props: { ...band(cols).props, maxRows: 1 }, surface: 'terminal' })
+    expect([cols, (await ui.find({ key: 'band-prompt' }))?.props?.width, await ui.find({ text: /^❯ ping$/ })]).toEqual([cols, 6, expect.anything()])
+    await ui.unmount()
+  }
+})

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2
+
+- A short last prompt such as `❯ ping` shows: one under 12 cells was left out even with room to spare.
+
 ## 0.7.1
 
 - The cache counts down in seconds through its last minute, `● 42s`, where it showed `<1m`.

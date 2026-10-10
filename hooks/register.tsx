@@ -409,7 +409,8 @@ export const register: Register = (on, options) => {
       col = 0
     }
     const cells = Math.min(full, width - col - 2)
-    if (lp && cells >= PROMPT_FLOOR) {
+    // PROMPT_FLOOR bounds a cut prompt; a short one that fits whole always shows.
+    if (lp && cells >= Math.min(full, PROMPT_FLOOR)) {
       segments.push({
         key: 'prompt',
         node: (
