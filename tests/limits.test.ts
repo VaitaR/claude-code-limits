@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { fmtAt, fmtLeft, gaugeCells, lastRequestAt, mergeLimits, parseConfig, parseCostSplit, quotaLevel, splitLines } from '../hooks/core'
+import { fmtAt, fmtLeft, gaugeCells, lastPromptOf, lastRequestAt, mergeLimits, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
 
 // The type lib is es2023 alone; the test runtime has timers.
 declare function setTimeout(fn: (value?: unknown) => void, ms: number): unknown
@@ -83,6 +83,14 @@ test('the cache clock is seeded from the request that fed the last main-loop res
   expect(lastRequestAt(tail)).toBe(Date.parse('2026-10-09T03:05:01.000Z'))
   expect(lastRequestAt(tail + '\n' + row({ type: 'system', subtype: 'compact_boundary', timestamp: '2026-10-09T03:07:00.000Z' }))).toBe(null)
   expect(lastRequestAt('')).toBe(null)
+})
+
+test('the last prompt reads as one line, from the newest last-prompt row of a transcript tail', () => {
+  expect(promptLine('  fix the\n\n  flaky   test ')).toBe('fix the flaky test')
+  expect(promptLine('x'.repeat(5000)).length).toBe(1000)
+  const tail = ['{"cut', row({ type: 'last-prompt', lastPrompt: 'first' }), row({ type: 'user' }), row({ type: 'last-prompt', lastPrompt: 'second\nline' }), '{"type":"last-prompt","lastPr'].join('\n')
+  expect(lastPromptOf(tail)).toBe('second line')
+  expect(lastPromptOf(['x', row({ type: 'user' })].join('\n'))).toBe(null)
 })
 
 // ---------------------------------------------------------------- drawing
@@ -362,6 +370,63 @@ test('a mod loaded mid-session starts the cache clock from the transcript, not c
     expect(await ui.find({ text: /^○ cold$/ })).toBeUndefined()
     expect((await ui.find({ key: 'band-cache' })) ?? (await ui.find({ text: /^● 50m$/ }))).toBeDefined()
     expect(await ui.find({ text: /^cache $/ })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+const submit = (text: string, origin: { kind: string; asUser?: true; name?: string }) =>
+  ({ text, wait: false, origin }) as never
+
+test('the band shows the person\'s last prompt, not a notification or another plugin\'s', async ($, on) => {
+  engine(on)
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  await $.prompt.submit(submit('fix the\n flaky test in   core.ts', { kind: 'composer' }))
+  await $.prompt.submit(submit('<task-notification>agent done</task-notification>', { kind: 'task-notification' }))
+  await $.prompt.submit(submit('from a plugin', { kind: 'plugin', name: 'other' }))
+  for (const surface of ['terminal', 'desktop'] as const) {
+    for (const cols of [40, 120]) {
+      const ui = await $.ui.mount({ ...band(cols), surface })
+      expect([surface, cols, await ui.find({ text: /^❯ fix the flaky test in core\.ts$/ })]).toEqual([surface, cols, expect.anything()])
+      for (const text of [/^last prompt · sent \d\d:\d\d$/, /^fix the flaky test in core\.ts$/]) expect([surface, cols, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, cols, String(text), expect.anything()])
+      for (const text of [/notification/, /from a plugin/]) expect([surface, String(text), await ui.find({ text })]).toEqual([surface, String(text), undefined])
+      await ui.unmount()
+    }
+  }
+  await $.prompt.submit(submit('typed on the phone', { kind: 'bridge' }))
+  const phone = await $.ui.mount({ ...band(120), surface: 'desktop' })
+  expect(await phone.find({ text: /^❯ typed on the phone$/ })).toBeDefined()
+  await phone.unmount()
+  await $.session.end({ reason: 'clear', sessionId: 'S-1' } as never)
+  const cleared = await $.ui.mount({ ...band(120), surface: 'desktop' })
+  expect(await cleared.find({ text: /^❯ / })).toBeUndefined()
+  await cleared.unmount()
+})
+
+test('a mod loaded mid-session shows the last prompt the transcript recorded', async ($, on) => {
+  engine(on)
+  on('session.usage', () => { throw new Error('no usage') })
+  on('session.id', () => ({ value: 'abc-123' }))
+  on('process.run', () => ({ value: { exitCode: 0, stderr: '', isStdoutTruncated: false, isStderrTruncated: false, stdout: ['x', row({ type: 'last-prompt', lastPrompt: 'map the repo' })].join('\n') } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...band(120), surface })
+    expect([surface, await ui.find({ text: /^❯ map the repo$/ })]).toEqual([surface, expect.anything()])
+    expect([surface, await ui.find({ text: hoverRow(surface, /^last prompt$/) })]).toEqual([surface, expect.anything()])
+    await ui.unmount()
+  }
+})
+
+test('the last prompt never makes the band taller than it may be', async ($, on) => {
+  engine(on)
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  await $.prompt.submit(submit('a prompt long enough to want a row of its own in a narrow band', { kind: 'composer' }))
+  const at = (cols: number, maxRows: number) => ({ ...band(cols), props: { ...band(cols).props, maxRows }, surface: 'terminal' as const })
+  // `cache ○ cold` is the only other segment here: 12 cells and a gap of 2.
+  for (const [cols, maxRows, width] of [[40, 10, 38], [40, 1, 24], [26, 1, undefined]] as const) {
+    const ui = await $.ui.mount(at(cols, maxRows))
+    expect([cols, maxRows, (await ui.find({ key: 'band-prompt' }))?.props?.width]).toEqual([cols, maxRows, width])
     await ui.unmount()
   }
 })

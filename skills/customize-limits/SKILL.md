@@ -47,7 +47,9 @@ The command gets the session id as its last argument and must print one JSON obj
 | how a value is formatted | the `fmt*` functions in `core.ts` |
 | what state is kept | the atoms at the top of `register.tsx`, typed in `types/index.d.ts` |
 
-To hide a segment, skip its `add(…)` call. Keep the band one line (see
+To hide a segment, skip its `add(…)` call. The last prompt is no `add`: it takes the room left after the
+wrap, so it is placed in the `if (lp)` block after it; drop that block to hide it, and `PROMPT_MIN` is the room
+it needs to share a row. Keep the band one line (see
 [CONTRIBUTING.md](../../CONTRIBUTING.md)): details belong in `detail`, the rows its hover shows.
 
 ## Add a segment

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0
+
+- The band ends with your last prompt, `❯ …`: in the room the line has left and cut with `…`, or on a row of its own when less than 40 cells remain and the band has a row to spare; without one it keeps to what is left, or is left out, so the band is never folded away. Its hover shows when it was sent and the prompt in full. Only your own prompts count, never a task notification, a peer session or another plugin's. A reloaded or resumed session shows the last prompt Claude Code recorded in its transcript.
+
 ## 0.6.1
 
 - In a terminal, a segment's hover is no longer painted over by the segments to its right, and is one line, since a terminal shows a hover only within the band's rows. A hover too long for its place moves left to fit, and follows its segment onto a wrapped row.

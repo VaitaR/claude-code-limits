@@ -26,6 +26,9 @@ export type CostSplit = {
   agents: { type: string; description: string; usd: number }[]
 }
 
+/** The person's last prompt as one line; `at` is when it was sent, null when read back from the transcript. */
+export type LastPrompt = { text: string; at: number | null }
+
 declare module 'claude-code' {
   interface PluginState {
     'limits': {
@@ -42,6 +45,7 @@ declare module 'claude-code' {
       /** What the last main turn cost; null before one ends or without a cost. */
       lastTurnUsd: number | null
       split: CostSplit | null
+      lastPrompt: LastPrompt | null
     }
   }
 }

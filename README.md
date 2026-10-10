@@ -3,10 +3,10 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code 2.1.287+](https://img.shields.io/badge/Claude%20Code-2.1.287%2B%20mod-d97757.svg)](https://claude.com/blog/claude-code-mods)
 
-**Know how much room you have left before the next prompt.** A Claude Code mod that puts your 5h and 7d quota, context, prompt-cache time and session cost on one line above the prompt, with the subagents still running. It works in the terminal and the desktop app; hover a segment for details.
+**Know how much room you have left before the next prompt.** A Claude Code mod that puts your 5h and 7d quota, context, prompt-cache time and session cost on one line above the prompt, with the subagents still running and what you last asked. It works in the terminal and the desktop app; hover a segment for details.
 
 <p align="center">
-  <img src="docs/media/demo.gif" alt="A Claude Code session in the terminal. A prompt asks for an Explore subagent; the line above the prompt shows the cache as live during the turn, then the running Explore agent, whose hover reads 1 subagent running. Hovering 5h, 7d, ctx, cache and the cost in turn shows each one's details, the cost split into main thread and subagent" width="760">
+  <img src="docs/media/demo.gif" alt="A Claude Code session in the terminal. A prompt asks for an Explore subagent; the line above the prompt shows the cache as live during the turn, then the running Explore agent, whose hover reads 1 subagent running. Once the turn ends the prompt shows under the line. Hovering 5h, 7d, ctx, cache and the cost in turn shows each one's details, the cost split into main thread and subagent" width="760">
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@ Mods are an early-access Claude Code feature and their API can change between re
 
 | Terminal |
 | --- |
-| <img src="docs/media/band.png" alt="The band in a terminal: 5h and 7d quota gauges with their resets, the context gauge, the cache dot with minutes left, the session cost and one running Explore subagent" width="760"> |
+| <img src="docs/media/band.png" alt="The band in a terminal: 5h and 7d quota gauges with their resets, the context gauge, the cache dot with minutes left and the session cost, with the last prompt on a row of its own" width="760"> |
 | **Desktop app** |
 | <img src="docs/media/desktop.png" alt="The band in the Claude desktop app above the prompt box: 5h 22% resetting in 2h22m, 7d 49% resetting in 4d19h, context 61% in amber after two compactions, cache live for 59 minutes, $19.51" width="760"> |
 
@@ -52,6 +52,7 @@ Hovering a segment shows its details: the desktop app lists them as rows, a term
 | **`cache`** | `● live` while a turn runs, then `● 59m`, the minutes the prompt cache has left, and `○ cold` once it has none | `cache · warm until 16:31 (1h TTL)` |
 | **`$0.20`** | the session's cost at API prices, subagents included | `session $0.20 at API prices, subagents included`, then the last turn's cost; with a [`costCommand`](#configure), rows for the main thread and the subagents |
 | **`◐ Explore`** | the subagents running now: the type of one, `◐ 3 agents` for several | `1 subagent running · Explore` |
+| **`❯ fix the flaky…`** | your last prompt, in the room the line has left and cut with `…`; with less than 40 cells left, on a row of its own when there is room for one | `last prompt · sent 16:18`, then the prompt in full |
 
 **Quiet until it matters.** While all is well the gauges, cache and cost stay in plain text colours. Amber and red mark what needs attention:
 
@@ -61,7 +62,7 @@ Hovering a segment shows its details: the desktop app lists them as rows, a term
 | `ctx` | 60%, and the `⟲N` of compactions | 80% |
 | `cache` | under 5 minutes left | expired: the next prompt rewrites the cache |
 
-Model, branch, effort and the like are left to the rest of the app. On a narrow window the line moves whole segments to a second row rather than cutting one.
+Model, branch, effort and the like are left to the rest of the app. On a narrow window the line moves whole segments to a second row rather than cutting one; only the last prompt is cut to fit.
 
 ## Configure
 
@@ -102,7 +103,7 @@ The plugin ships a skill, **`customize-limits`**, that knows where each threshol
 
 > make the context gauge turn amber at 50%
 >
-> hide the cost segment
+> hide the cost segment, or the last prompt while I share my screen
 >
 > add a segment with the current git branch
 >
@@ -116,9 +117,10 @@ The plugin ships a skill, **`customize-limits`**, that knows where each threshol
 | --- | --- |
 | context, cost and rate-limit readings | `session.measure`, `$.session.usage()` |
 | when the main loop's requests are sent and answered | `turn.step` |
+| the text of your own prompts: typed, from the desktop app or Remote Control, never a notification's or another plugin's | `prompt.submit` |
 | compactions | `session.compact` |
 | subagent spawns and ends (type only) | `agent.spawn`, `turn.complete` |
-| the tail of this session's transcript, at session start while no request has been seen yet, to start the cache clock | `sh -c tail -c 400000 ~/.claude/projects/*/<session id>.jsonl` |
+| the tail of this session's transcript, at session start while no request or prompt has been seen yet, to start the cache clock and show the last prompt Claude Code recorded | `sh -c tail -c 400000 ~/.claude/projects/*/<session id>.jsonl` |
 | your `costCommand`'s output, if you set one | `$.process.run` |
 
 It makes **no** network requests and calls no model; your `costCommand` runs as you wrote it. State lives in session atoms and ends with the session. `claude plugin validate .` prints exactly what it hooks and calls.

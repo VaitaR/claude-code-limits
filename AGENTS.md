@@ -1,7 +1,7 @@
 # limits — agent contract
 
-A Claude Code mod: one line above the prompt with quota, context, prompt cache, cost and running
-subagents. Read before changing anything:
+A Claude Code mod: one line above the prompt with quota, context, prompt cache, cost, running
+subagents and the last prompt. Read before changing anything:
 
 | File | For |
 | --- | --- |

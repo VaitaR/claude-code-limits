@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { Running, Usage } from '../types'
+import type { LastPrompt, Running, Usage } from '../types'
 import {
   DEFAULT_USAGE,
   PALETTES,
@@ -12,6 +12,7 @@ import {
   fmtUsd,
   gaugeCells,
   kTokens,
+  lastPromptOf,
   lastRequestAt,
   limitLabel,
   limitsOf,
@@ -21,7 +22,9 @@ import {
   parseConfig,
   parseCostSplit,
   plural,
+  promptLine,
   quotaLevel,
+  shorten,
   splitLines,
 } from './core'
 import type { Config } from './core'
@@ -34,6 +37,7 @@ const running = atom({ plugin: 'limits', key: 'running' } as const, [])
 const costAtStart = atom({ plugin: 'limits', key: 'costAtStart' } as const, null)
 const lastTurnUsd = atom({ plugin: 'limits', key: 'lastTurnUsd' } as const, null)
 const split = atom({ plugin: 'limits', key: 'split' } as const, null)
+const lastPrompt = atom({ plugin: 'limits', key: 'lastPrompt' } as const, null)
 
 // Every read goes through these, so a value saved under an older shape still reads.
 async function getUsage($: EngineInterface): Promise<Usage> {
@@ -42,23 +46,34 @@ async function getUsage($: EngineInterface): Promise<Usage> {
 async function getRunning($: EngineInterface): Promise<Running[]> {
   return listOf<Running>(await read($, running))
 }
+async function getLastPrompt($: EngineInterface): Promise<LastPrompt | null> {
+  const p = (await read($, lastPrompt)) as Partial<LastPrompt> | null
+  return p && typeof p.text === 'string' && p.text ? { text: p.text, at: typeof p.at === 'number' ? p.at : null } : null
+}
+const PROMPT_MIN = 40
+const PROMPT_FLOOR = 12
 const numOr = <T,>(v: unknown, d: T): number | T => (typeof v === 'number' && Number.isFinite(v) ? v : d)
 
 /**
- * A module loaded mid-session (a reload, a later install) has seen no request: the cache clock starts
- * from the transcript's last main-loop request instead. The transcript is found by session id, so no
- * project-folder naming is assumed; only its tail is read.
+ * A module loaded mid-session (a reload, a resume, a later install) has seen no request and no prompt:
+ * the cache clock starts from the transcript's last main-loop request, and the last prompt is the one
+ * Claude Code recorded there. The transcript is found by session id, so no project-folder naming is
+ * assumed; only its tail is read.
  */
-async function seedCache($: EngineInterface) {
-  if (numOr(await read($, cacheAt), 0) > 0) return
+async function seedFromTranscript($: EngineInterface) {
+  const needCache = numOr(await read($, cacheAt), 0) <= 0
+  const needPrompt = (await getLastPrompt($)) === null
+  if (!needCache && !needPrompt) return
   const id = await $.session.id().catch(() => null)
   if (!id || !/^[\w-]+$/.test(id)) return
   const out = await $.process
     .run(['sh', '-c', 'tail -c 400000 "$HOME"/.claude/projects/*/"$1".jsonl 2>/dev/null', 'sh', id], { timeoutMs: 5000 })
     .then(r => r.stdout)
     .catch(() => '')
-  const at = lastRequestAt(out)
+  const at = needCache ? lastRequestAt(out) : null
   if (at) await update($, cacheAt, x => (numOr(x, 0) > 0 ? x : at))
+  const text = needPrompt ? lastPromptOf(out) : null
+  if (text) await update($, lastPrompt, x => x ?? { text, at: null })
 }
 
 /**
@@ -112,6 +127,7 @@ async function resetAll($: EngineInterface) {
   await update($, costAtStart, () => null)
   await update($, lastTurnUsd, () => null)
   await update($, split, () => null)
+  await update($, lastPrompt, () => null)
   // The context gauge waits for the next measurement rather than showing the pre-clear fill.
   await update($, usage, x => ({ ...normalize(DEFAULT_USAGE, x), pct: null, tokens: null, compactions: 0 }))
 }
@@ -136,7 +152,7 @@ export const register: Register = (on, options) => {
         limits: mergeLimits(normalize(DEFAULT_USAGE, x).limits, limitsOf(u.rateLimits), at),
       }))
     }
-    await Promise.all([seedCache($), readCompactWindow($)])
+    await Promise.all([seedFromTranscript($), readCompactWindow($)])
     void refreshSplit($, cfg).catch(() => undefined)
     return next(e)
   })
@@ -144,6 +160,23 @@ export const register: Register = (on, options) => {
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') await resetAll($)
     return next(e)
+  })
+
+  // The person's own words: typed, through Remote Control, from an SDK host such as the desktop app, or
+  // sent by a plugin as theirs. A task's notification, a peer session or a schedule is not their prompt.
+  on('prompt.submit', async ($, e, next) => {
+    const done = await next(e)
+    const o = e.origin
+    const own = o.kind === 'composer' || o.kind === 'bridge' || o.kind === 'sdk' || (o.kind === 'plugin' && o.asUser === true)
+    const text = promptLine(e.text)
+    // The prompt has entered by now: a failure here must not reach the person as an error on it.
+    if (own && text && !('drop' in done)) {
+      await $.clock
+        .now()
+        .then(at => update($, lastPrompt, () => ({ text, at })))
+        .catch(() => undefined)
+    }
+    return done
   })
 
   on('turn.start', async ($, e, next) => {
@@ -223,13 +256,14 @@ export const register: Register = (on, options) => {
     const els = $.ui.resolve(e)
     const { Box, Text } = els
     const hasClient = 'Client' in els
-    const [u, agents, cache, now, lastTurn, sp] = await Promise.all([
+    const [u, agents, cache, now, lastTurn, sp, lp] = await Promise.all([
       getUsage($),
       getRunning($),
       read($, cacheAt),
       $.clock.now(),
       read($, lastTurnUsd),
       read($, split),
+      getLastPrompt($),
     ])
     const cx = contextOf(u)
     const sentAt = numOr(cache, 0)
@@ -341,7 +375,7 @@ export const register: Register = (on, options) => {
     const hoverWidth = (rows: string[]) => Math.min(Math.max(...rows.map(l => l.length)) + 2, width)
     const card = (key: string, rows: string[]) =>
       rows.map((l, j) => (
-        <Text key={`${key}-${j}`} color={j === 0 ? C.text : C.dim} wrap="truncate">
+        <Text key={`${key}-${j}`} color={j === 0 ? C.text : C.dim} wrap={key === 'prompt' && j > 0 ? 'wrap' : 'truncate'}>
           {l}
         </Text>
       ))
@@ -362,6 +396,33 @@ export const register: Register = (on, options) => {
       }
       placed.push({ row, col })
       col += room
+    }
+
+    // The last prompt takes what its row has left, cut with `…`; with less than PROMPT_MIN cells left it
+    // starts a row of its own. Its cells are set here, not by its text, so it is placed last. A band
+    // taller than `maxRows` is folded into an `n more` row, hiding every segment: the prompt then stays
+    // in what its row has left, or is left out.
+    const plain = lp ? `❯ ${lp.text}` : ''
+    const full = [...plain].length
+    if (lp && col > 0 && width - col - 2 < Math.min(full, PROMPT_MIN) && row + 2 <= e.props.maxRows) {
+      row += 1
+      col = 0
+    }
+    const cells = Math.min(full, width - col - 2)
+    if (lp && cells >= PROMPT_FLOOR) {
+      segments.push({
+        key: 'prompt',
+        node: (
+          <Box key="band-prompt" width={cells}>
+            <Text color={C.dim} wrap="truncate">
+              {plain}
+            </Text>
+          </Box>
+        ),
+        detail: [lp.at !== null ? `last prompt · sent ${fmtAt(lp.at, now)}` : 'last prompt', shorten(lp.text, 400)],
+        cells,
+      })
+      placed.push({ row, col })
     }
 
     return (

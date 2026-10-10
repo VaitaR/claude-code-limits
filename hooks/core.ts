@@ -213,3 +213,24 @@ export const lastRequestAt = (tail: string): number | null => {
   const at = Date.parse((before ?? main[first])?.timestamp ?? '')
   return Number.isFinite(at) ? at : null
 }
+
+// ---------------------------------------------------------------- last prompt
+
+/** A prompt as one line: line breaks and runs of spaces read as one space; a long paste keeps its head. */
+export const promptLine = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 1000)
+
+/** The person's last prompt as Claude Code records it in the transcript's `last-prompt` rows; null when the tail has none. */
+export const lastPromptOf = (tail: string): string | null => {
+  const lines = tail.split('\n').slice(1)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i] ?? ''
+    if (!line.includes('"last-prompt"')) continue
+    try {
+      const r = JSON.parse(line) as { type?: string; lastPrompt?: unknown }
+      if (r.type === 'last-prompt' && typeof r.lastPrompt === 'string') return promptLine(r.lastPrompt) || null
+    } catch {
+      // a cut line
+    }
+  }
+  return null
+}
