@@ -43,8 +43,9 @@ subagents. Read before changing anything:
   user's settings and session state.
 - **The `costCommand` JSON is a public contract** (README). Add optional fields only; a renamed or
   required field breaks users' scripts silently, since a bad output just keeps the last split.
-- **The README's "What it can reach" table lists every `$` call and hook.** A new one updates the
-  table in the same change; `claude plugin validate .` prints the real list to compare against.
+- **The README's "What it can reach" table lists every source the mod reads data from** (lifecycle
+  hooks and `$.clock`/`$.session.id` are left out). A new source updates the table in the same change;
+  `claude plugin validate .` prints every hook and call to compare against.
 - **No private names in the repo**: it is public-bound. The owner's own cost script and setup stay out.
 - **Media in `docs/media/` are real captures**, never mock-ups. Re-shoot them when the band's look
   changes: capture with `tmux capture-pane -e -p > x.ans`, crop the lines, then
