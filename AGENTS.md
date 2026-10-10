@@ -51,7 +51,8 @@ subagents. Read before changing anything:
   changes: capture with `tmux capture-pane -e -p > x.ans`, crop the lines, then
   `python3 tools/media/ans2html.py x.ans x.html` and
   `uv run --with playwright python tools/media/shot.py x.html`. Crop out the owner's status line
-  and any private prompt text. The desktop capture comes from the owner.
+  and any private prompt text. `demo.gif` is re-shot with `tools/media/record.py` then `gif.py`
+  (usage in each). The desktop capture comes from the owner.
 
 ## Needs the owner
 
