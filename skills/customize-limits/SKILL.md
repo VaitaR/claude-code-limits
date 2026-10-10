@@ -80,9 +80,9 @@ then `ui.find({ text: /…/ })` or `ui.find({ key })`. Follow the existing tests
   part of a row first (the amount before the description).
 - **A hover box needs an explicit width.** Unsized, it takes its segment's width and truncates.
 - **A terminal paints in tree order and clips a hover to the band's rows.** A hover drawn inside its segment
-  lay under the segments after it. So in a terminal the hovers are one row each, drawn after every segment at
-  the cell the band's wrap gives them, and lit through `hover.scope`. A new segment passes its text as
-  `add`'s last argument: that is how its width, and every later hover's place, is known. Check a hover change
+  lay under the segments after it. So in a terminal the hovers are one row each, drawn after every segment
+  across the whole row the band's wrap puts their segment on, and lit through `hover.scope`. A new segment
+  passes its text as `add`'s last argument: that is how its width, and every later hover's row, is known. Check a hover change
   in a real terminal with the tmux recipe in [AGENTS.md](../../AGENTS.md) "Done means".
 - **Never declare a variable named `on`** (or `$`, `next`) inside `register`: the module fails to load.
 - **Engine stubs in a test are registered before the first `$` call**, and must return the fields the

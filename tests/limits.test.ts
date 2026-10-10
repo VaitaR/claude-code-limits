@@ -435,6 +435,21 @@ test('the last prompt never makes the band taller than it may be', async ($, on)
   }
 })
 
+test('a terminal hover covers its segment\'s whole row, never a box sat on the neighbours', async ($, on) => {
+  engine(on)
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  await $.prompt.submit(submit('a prompt long enough to want a row of its own in a narrow band', { kind: 'composer' }))
+  // At 40 columns the prompt wraps to row 1; `cache ○ cold` stays on row 0.
+  const ui = await $.ui.mount({ ...band(40), props: { ...band(40).props, maxRows: 10 }, surface: 'terminal' })
+  const at = async (key: string) => {
+    const p = (await ui.find({ key }))?.props
+    return [key, p?.top, p?.left, p?.width]
+  }
+  expect(await at('hover-cache')).toEqual(['hover-cache', 0, 0, 40])
+  expect(await at('hover-prompt')).toEqual(['hover-prompt', 1, 0, 40])
+  await ui.unmount()
+})
+
 test('a short prompt shows whole, even in less room than a cut one needs', async ($, on) => {
   engine(on)
   on('prompt.submit', (_$, e) => ({ text: e.text }))

@@ -43,7 +43,7 @@ Mods are an early-access Claude Code feature and their API can change between re
 | **Desktop app** |
 | <img src="docs/media/desktop.png" alt="The band in the Claude desktop app above the prompt box: 5h 22% resetting in 2h22m, 7d 49% resetting in 4d19h, context 61% in amber after two compactions, cache live for 59 minutes, $19.51" width="760"> |
 
-Hovering a segment shows its details: the desktop app lists them as rows, a terminal joins them into one line, shifted left if it would run past the edge.
+Hovering a segment shows its details: the desktop app lists them as rows, a terminal joins them into one line across the segment's whole row.
 
 | Segment | Shows | Hover, for example |
 | --- | --- | --- |

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.3
+
+- A terminal hover takes its segment's whole row: shifted left to fit, it sat flush on the segments beside it.
+
 ## 0.7.2
 
 - A short last prompt such as `❯ ping` shows: one under 12 cells was left out even with room to spare.

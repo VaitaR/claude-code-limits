@@ -381,11 +381,12 @@ export const register: Register = (on, options) => {
       ))
 
     // A terminal paints in tree order, so a hover drawn inside its segment lay under the segments after
-    // it, and it clips a hover to the band's own rows. There the hovers are one row each, drawn after
-    // every segment where the band's wrap puts that segment (its cells are known in a terminal), and
-    // shifted left to fit; the segment lights its hover through a scope.
+    // it, and it clips a hover to the band's own rows. There each hover is drawn after every segment and
+    // covers the whole row the band's wrap puts its segment on (its cells are known in a terminal): a box
+    // at the segment, shifted left to fit, sat flush on its neighbours' text. The segment lights its
+    // hover through a scope.
     const terminal = e.surface === 'terminal'
-    const placed: { row: number; col: number }[] = []
+    const placed: number[] = []
     let row = 0
     let col = 0
     for (const s of segments) {
@@ -394,7 +395,7 @@ export const register: Register = (on, options) => {
         row += 1
         col = 0
       }
-      placed.push({ row, col })
+      placed.push(row)
       col += room
     }
 
@@ -423,7 +424,7 @@ export const register: Register = (on, options) => {
         detail: [lp.at !== null ? `last prompt · sent ${fmtAt(lp.at, now)}` : 'last prompt', shorten(lp.text, 400)],
         cells,
       })
-      placed.push({ row, col })
+      placed.push(row)
     }
 
     return (
@@ -460,13 +461,13 @@ export const register: Register = (on, options) => {
         {terminal
           ? segments.map((s, i) => {
               const rows = [s.detail.join(' · ')]
-              const w = hoverWidth(rows)
               return (
                 <Box
+                  key={`hover-${s.key}`}
                   position="absolute"
-                  top={placed[i]?.row ?? 0}
-                  left={Math.max(0, Math.min(placed[i]?.col ?? 0, width - w))}
-                  width={w}
+                  top={placed[i] ?? 0}
+                  left={0}
+                  width={width}
                   display="none"
                   hover={{ scope: `limits-${s.key}`, display: 'flex' }}
                   backgroundColor={C.faint}
