@@ -1,0 +1,17 @@
+{
+  "name": "claude-code-limits",
+  "metadata": {
+    "description": "limits: a Claude Code mod that shows your quota, context, prompt cache and cost on one line above the prompt."
+  },
+  "owner": {
+    "name": "Andrei Shivalin",
+    "url": "https://github.com/VaitaR"
+  },
+  "plugins": [
+    {
+      "name": "limits",
+      "source": "./",
+      "description": "Quota, context, prompt-cache and cost headroom on one line above the prompt; details on hover."
+    }
+  ]
+}

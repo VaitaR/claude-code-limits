@@ -1,0 +1,53 @@
+{
+  "name": "limits",
+  "version": "0.6.0",
+  "description": "Claude Code mod: your 5h/7d quota, context window, prompt-cache time left and session cost on one line above the prompt, with per-subagent cost on hover",
+  "author": {
+    "name": "Andrei Shivalin",
+    "url": "https://github.com/VaitaR"
+  },
+  "homepage": "https://github.com/VaitaR/claude-code-limits",
+  "repository": "https://github.com/VaitaR/claude-code-limits",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "claude-code-mod",
+    "claude-code-plugin",
+    "rate-limits",
+    "usage-limits",
+    "context-window",
+    "prompt-cache",
+    "cost",
+    "statusline",
+    "subagents"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "cacheTtl": {
+      "title": "Prompt cache TTL",
+      "description": "How long the main loop's prompt cache lives after its last response: 1h with extended caching, 5m otherwise",
+      "type": "string",
+      "options": [
+        "1h",
+        "5m"
+      ],
+      "default": "1h"
+    },
+    "palette": {
+      "title": "Palette",
+      "description": "theme follows your Claude Code theme (light, dark, colour-blind); pastel is fixed colours tuned for dark terminals",
+      "type": "string",
+      "options": [
+        "theme",
+        "pastel"
+      ],
+      "default": "theme"
+    },
+    "costCommand": {
+      "title": "Cost split command",
+      "description": "Command that prints a session's cost split by main thread and subagent as JSON (see the README); the session id is appended. Empty: the cost hover shows the total only",
+      "type": "string",
+      "default": ""
+    }
+  }
+}
