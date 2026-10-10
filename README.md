@@ -37,9 +37,11 @@ Mods are an early-access Claude Code feature and their API can change between re
 
 ## What you see
 
-<p align="center">
-  <img src="docs/media/band.png" alt="The band alone: 5h and 7d quota gauges with their resets, the context gauge, the cache dot with minutes left, the session cost and one running Explore subagent" width="760">
-</p>
+| Terminal |
+| --- |
+| <img src="docs/media/band.png" alt="The band in a terminal: 5h and 7d quota gauges with their resets, the context gauge, the cache dot with minutes left, the session cost and one running Explore subagent" width="760"> |
+| **Desktop app** |
+| <img src="docs/media/desktop.png" alt="The band in the Claude desktop app above the prompt box: 5h 22% resetting in 2h22m, 7d 49% resetting in 4d19h, context 61% in amber after two compactions, cache live for 59 minutes, $19.51" width="760"><br>Context past 60% turns amber; `⟲2` counts the compactions so far. |
 
 | Segment | Reads | Hover, for example |
 | --- | --- | --- |
