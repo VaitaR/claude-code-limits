@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code 2.1.287+](https://img.shields.io/badge/Claude%20Code-2.1.287%2B%20mod-d97757.svg)](https://claude.com/blog/claude-code-mods)
 
-**Before you send the next prompt, know how much room you have left**: quota, context, prompt cache and money. A Claude Code mod that puts them on one line above the prompt, in the terminal and the desktop app, with details on hover.
+**Know how much room you have left before the next prompt.** A Claude Code mod that puts your 5h and 7d quota, context, prompt-cache time and session cost on one line above the prompt, with the subagents still running. It works in the terminal and the desktop app; hover a segment for details.
 
 <p align="center">
   <img src="docs/media/session.png" alt="A Claude Code session in the terminal: while an Explore subagent runs in the background, the line above the prompt reads 5h 21% resetting in 2h38m, 7d 48% resetting in 4d19h, context 11%, cache live for 59 more minutes, $0.20, and the running Explore agent" width="760">
@@ -41,27 +41,27 @@ Mods are an early-access Claude Code feature and their API can change between re
 | --- |
 | <img src="docs/media/band.png" alt="The band in a terminal: 5h and 7d quota gauges with their resets, the context gauge, the cache dot with minutes left, the session cost and one running Explore subagent" width="760"> |
 | **Desktop app** |
-| <img src="docs/media/desktop.png" alt="The band in the Claude desktop app above the prompt box: 5h 22% resetting in 2h22m, 7d 49% resetting in 4d19h, context 61% in amber after two compactions, cache live for 59 minutes, $19.51" width="760"><br>Context past 60% turns amber; `⟲2` counts the compactions so far. |
+| <img src="docs/media/desktop.png" alt="The band in the Claude desktop app above the prompt box: 5h 22% resetting in 2h22m, 7d 49% resetting in 4d19h, context 61% in amber after two compactions, cache live for 59 minutes, $19.51" width="760"> |
 
-| Segment | Reads | Hover, for example |
+Hovering a segment shows its details: the desktop app lists them as rows, a terminal joins them into one line, shifted left if it would run past the edge.
+
+| Segment | Shows | Hover, for example |
 | --- | --- | --- |
-| **`5h`** **`7d`** | the rate-limit windows your plan reports: how much is used, and `↻` the time to each reset | `5h · 21% used, 79% left · resets 18:07` |
+| **`5h`** **`7d`** | how much of each rate-limit window your plan reports is used, and after `↻` the time to its reset | `5h · 21% used, 79% left · resets 18:07` |
 | **`ctx`** | context against the window Claude Code compacts at; `⟲3` after three compactions | `ctx · 31k of 258k tokens · 3 compactions` |
-| **`cache`** | `● live` while a turn runs, then `● 59m` the minutes the prompt cache has left, `○ cold` once it expired | `cache · warm until 16:31 (1h TTL)` |
-| **`$0.20`** | the session's cost at API prices, subagents included | the last turn's cost; with a [`costCommand`](#configure), the main thread and each subagent a row apiece |
-| **`◐ Explore`** | subagents running now: the type of one, `◐ 3 agents` for several | their types |
+| **`cache`** | `● live` while a turn runs, then `● 59m`, the minutes the prompt cache has left, and `○ cold` once it has none | `cache · warm until 16:31 (1h TTL)` |
+| **`$0.20`** | the session's cost at API prices, subagents included | `session $0.20 at API prices, subagents included`, then the last turn's cost; with a [`costCommand`](#configure), rows for the main thread and the subagents |
+| **`◐ Explore`** | the subagents running now: the type of one, `◐ 3 agents` for several | `1 subagent running · Explore` |
 
-In the desktop app a hover lists its rows; a terminal shows it as one line, moved left when it would run past the edge.
-
-**Quiet until it matters.** The line stays grey and white while all is well. Colour marks only what needs attention:
+**Quiet until it matters.** While all is well the gauges, cache and cost stay in plain text colours. Amber and red mark what needs attention:
 
 | | Amber | Red |
 | --- | --- | --- |
-| `5h` `7d` | 70% used, or a reset under 5 minutes away | 90% used |
+| `5h` `7d` | 70% used | 90% used |
 | `ctx` | 60%, and the `⟲N` of compactions | 80% |
-| `cache` | under 5 minutes left | cold: the next prompt rewrites the whole cache |
+| `cache` | under 5 minutes left | expired: the next prompt rewrites the cache |
 
-Model, branch, effort and the like are left to the rest of the app. On a narrow window the line wraps whole segments onto a second row rather than cutting one.
+Model, branch, effort and the like are left to the rest of the app. On a narrow window the line moves whole segments to a second row rather than cutting one.
 
 ## Configure
 
@@ -70,8 +70,8 @@ In `/config`, or under `pluginConfigs["limits"].options` in `settings.json`:
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `cacheTtl` | `1h` | the main loop's prompt-cache lifetime: `1h` with extended caching, `5m` otherwise |
-| `palette` | `theme` | `pastel` uses fixed colours tuned for dark terminals |
-| `costCommand` | empty | a command printing a session's cost split as JSON, the session id appended; the cost hover then names the main thread and each subagent |
+| `palette` | `theme` | `theme` follows your Claude Code theme (light, dark, colour-blind); `pastel` uses fixed colours tuned for dark terminals |
+| `costCommand` | empty | a command that prints the session's cost split as JSON; it is split on spaces into arguments, without quoting |
 
 <details>
 <summary><strong>The <code>costCommand</code> contract</strong></summary>
@@ -83,7 +83,7 @@ The command gets the session id as its last argument and prints one JSON object:
   "agents": [{ "agent_type": "Explore", "description": "map the repo", "usd": 0.1 }] }
 ```
 
-The hover then reads, costliest first:
+Only `total_usd` is required; a missing amount counts as zero. The hover lists `agents` in the order given, so print the costliest first: it names the first six and sums the rest into one row, and a non-zero `unpriced_calls` adds a row of its own. For the object above it reads:
 
 ```
 session $5.85 at API prices
@@ -92,13 +92,13 @@ $0.10 Explore · map the repo
 +$0.42 last turn
 ```
 
-It runs at session start, at each main turn's end and at each subagent's end, one run at a time, with a 15 s timeout. A failure keeps the last split. The [`customize-limits`](skills/customize-limits/SKILL.md) skill explains how to price a transcript.
+The command runs at session start and at the end of each main turn and each subagent, one run at a time, with a 15 s timeout. A non-zero exit, a timeout or output without `total_usd` keeps the last split. The [`customize-limits`](skills/customize-limits/SKILL.md) skill explains how to price a transcript.
 
 </details>
 
 ## Make it yours
 
-The plugin ships a skill, **`customize-limits`**. Ask Claude in plain words:
+The plugin ships a skill, **`customize-limits`**, that knows where each threshold, colour, gauge and segment lives, how to add one and test it, and the traps of drawing in a terminal. Ask Claude in plain words:
 
 > make the context gauge turn amber at 50%
 >
@@ -108,11 +108,9 @@ The plugin ships a skill, **`customize-limits`**. Ask Claude in plain words:
 >
 > wire a costCommand for my sessions
 
-It knows where each threshold, colour, gauge and segment lives, how to add one, how to test the change, and the traps of drawing in a terminal.
-
 ## What it can reach
 
-**It only watches.** Every hook passes its event on unchanged: it never denies, rewrites or delays anything.
+**It only watches.** No hook denies or rewrites a prompt, a tool call or a subagent; the one drawing hook fills the line above the prompt.
 
 | It reads | Through |
 | --- | --- |
@@ -120,15 +118,15 @@ It knows where each threshold, colour, gauge and segment lives, how to add one, 
 | when the main loop's requests are sent and answered | `turn.step` |
 | compactions | `session.compact` |
 | subagent spawns and ends (type only) | `agent.spawn`, `turn.complete` |
-| the tail of this session's transcript, once, when loaded mid-session, to start the cache clock | `sh -c tail -c 400000 ~/.claude/projects/*/<session id>.jsonl` |
+| the tail of this session's transcript, at session start while no request has been seen yet, to start the cache clock | `sh -c tail -c 400000 ~/.claude/projects/*/<session id>.jsonl` |
 | your `costCommand`'s output, if you set one | `$.process.run` |
 
-It makes **no** network requests and calls no model. State lives in session atoms and ends with the session. `claude plugin validate .` prints exactly what it hooks and calls.
+It makes **no** network requests and calls no model; your `costCommand` runs as you wrote it. State lives in session atoms and ends with the session. `claude plugin validate .` prints exactly what it hooks and calls.
 
 ## What is inferred, not measured
 
-- **The cache clock** starts when the main loop's last answered request was sent and runs for `cacheTtl`. The engine reports no TTL, so a wrong `cacheTtl` gives a wrong clock.
-- **Quotas are account-wide.** Parallel sessions spend the same windows; the band shows the last reading any response carried. A reading without a window keeps the previous one until it resets.
+- **The cache clock** starts when the main loop's last answered request was sent and runs for `cacheTtl`. The engine reports no TTL, so a wrong `cacheTtl` gives a wrong clock. A compaction sets the cache to cold.
+- **Quotas are account-wide.** Parallel sessions spend the same windows, and the band shows the last reading this session received. A reading without a window keeps the previous one until it resets.
 - **Cost is the engine's API-price figure.** On a subscription it is what the session would cost at API prices, not a bill.
 
 ## Develop
