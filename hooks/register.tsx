@@ -235,8 +235,11 @@ export const register: Register = (on, options) => {
     const sentAt = numOr(cache, 0)
     const last = numOr(lastTurn, null)
     const levelColor = { ok: C.text, warn: C.amber, hot: C.warn }
-    const segments: { key: string; node: RenderChildren; detail: string[] }[] = []
-    const add = (key: string, node: RenderChildren, detail: string | string[]) => segments.push({ key, node, detail: typeof detail === 'string' ? [detail] : detail })
+    // `plain` is the segment as text, for its width in a terminal's cells.
+    const segments: { key: string; node: RenderChildren; detail: string[]; cells: number }[] = []
+    const add = (key: string, node: RenderChildren, detail: string | string[], plain: string) =>
+      segments.push({ key, node, detail: typeof detail === 'string' ? [detail] : detail, cells: [...plain].length })
+    const gauge = (label: string, pct: number) => `${label} ${'━'.repeat(6)} ${Math.round(pct)}%`
     // One glyph for both parts keeps every gauge the same width in a proportional font.
     const meter = (label: string, pct: number, color: string) => {
       const filled = gaugeCells(pct, 6)
@@ -262,6 +265,7 @@ export const register: Register = (on, options) => {
           )}
         </Box>,
         `${label} · ${Math.round(l.pct)}% used, ${Math.round(100 - l.pct)}% left${l.resetsAt ? ` · resets ${fmtAt(l.resetsAt, now)}` : ''}`,
+        `${gauge(label, l.pct)}${l.resetsAt ? ` ↻${fmtLeft(l.resetsAt - now)}` : ''}`,
       )
     }
     if (cx.pct !== null) {
@@ -272,6 +276,7 @@ export const register: Register = (on, options) => {
           {u.compactions > 0 ? <Text color={C.amber}>{` ⟲${u.compactions}`}</Text> : null}
         </Box>,
         `ctx · ${u.tokens !== null ? `${kTokens(u.tokens)} of ${kTokens(cx.limit)} tokens` : `${Math.round(cx.pct)}%`}${u.compactions > 0 ? ` · ${plural(u.compactions, 'compaction')}` : ''}`,
+        `${gauge('ctx', cx.pct)}${u.compactions > 0 ? ` ⟲${u.compactions}` : ''}`,
       )
     }
     const until = sentAt + cfg.cacheTtlMs
@@ -300,6 +305,7 @@ export const register: Register = (on, options) => {
           : until <= now
             ? `cache · cold since ${fmtAt(until, now)}: the next prompt rewrites it`
             : `cache · warm until ${fmtAt(until, now)} (${ttl} TTL)`,
+      `cache ${e.props.isWorking ? '● live' : sentAt <= 0 || until <= now ? '○ cold' : `● ${fmtCacheMin(until - now)}`}`,
     )
 
     // The engine prices every response of the session, its subagents' included; on a plan it is the API-price equivalent.
@@ -312,51 +318,103 @@ export const register: Register = (on, options) => {
           ...(sp ? splitLines(sp) : []),
           ...(last !== null ? [`+${fmtUsd(last)} last turn`] : []),
         ],
+        fmtUsd(u.costUsd),
       )
     }
 
     // A segment like the rest, so a narrow band wraps it whole: squeezed at the right edge it read as `◐…`.
     if (agents.length > 0) {
+      const label = agents.length === 1 ? `◐ ${agents[0]?.type}` : `◐ ${agents.length} agents`
       add(
         'agents',
-        <Text color={C.agent}>{agents.length === 1 ? `◐ ${agents[0]?.type}` : `◐ ${agents.length} agents`}</Text>,
+        <Text color={C.agent}>{label}</Text>,
         [
           `${plural(agents.length, 'subagent')} running`,
           ...agents.slice(0, 6).map(a => a.type),
           ...(agents.length > 6 ? [`+${agents.length - 6} more`] : []),
         ],
+        label,
       )
     }
 
+    const width = Math.max(20, e.props.bodyColumns)
+    const hoverWidth = (rows: string[]) => Math.min(Math.max(...rows.map(l => l.length)) + 2, width)
+    const card = (key: string, rows: string[]) =>
+      rows.map((l, j) => (
+        <Text key={`${key}-${j}`} color={j === 0 ? C.text : C.dim} wrap="truncate">
+          {l}
+        </Text>
+      ))
+
+    // A terminal paints in tree order, so a hover drawn inside its segment lay under the segments after
+    // it, and it clips a hover to the band's own rows. There the hovers are one row each, drawn after
+    // every segment where the band's wrap puts that segment (its cells are known in a terminal), and
+    // shifted left to fit; the segment lights its hover through a scope.
+    const terminal = e.surface === 'terminal'
+    const placed: { row: number; col: number }[] = []
+    let row = 0
+    let col = 0
+    for (const s of segments) {
+      const room = s.cells + 2
+      if (col > 0 && col + room > width) {
+        row += 1
+        col = 0
+      }
+      placed.push({ row, col })
+      col += room
+    }
+
     return (
-      <Box width={Math.max(20, e.props.bodyColumns)}>
+      <Box width={width}>
         <Box flexWrap="wrap" flexShrink={1}>
           {/* The gap trails each segment: a wrapped row then starts flush, where a leading `│` read as a stray mark. */}
-          {segments.map(s => (
-            <Box key={s.key} marginRight={2}>
-              {s.node}
-              {/* Shown while the pointer is on the segment. Sized to its longest row: unsized, it took the
-                  segment's width and truncated. A terminal clips the rows past the band's own. */}
-              <Box
-                position="absolute"
-                top={0}
-                left={0}
-                width={Math.min(Math.max(...s.detail.map(l => l.length)) + 2, Math.max(20, e.props.bodyColumns))}
-                flexDirection="column"
-                display="none"
-                hover={{ display: 'flex' }}
-                backgroundColor={C.faint}
-                paddingX={1}
-              >
-                {s.detail.map((l, j) => (
-                  <Text key={`${s.key}-${j}`} color={j === 0 ? C.text : C.dim} wrap="truncate">
-                    {l}
-                  </Text>
-                ))}
+          {segments.map(s =>
+            terminal ? (
+              <Box key={s.key} marginRight={2} hover={{ scope: `limits-${s.key}` }}>
+                {s.node}
               </Box>
-            </Box>
-          ))}
+            ) : (
+              <Box key={s.key} marginRight={2}>
+                {s.node}
+                {/* Shown while the pointer is on the segment. Sized to its longest row: unsized, it took the
+                    segment's width and truncated. */}
+                <Box
+                  position="absolute"
+                  top={0}
+                  left={0}
+                  width={hoverWidth(s.detail)}
+                  flexDirection="column"
+                  display="none"
+                  hover={{ display: 'flex' }}
+                  backgroundColor={C.faint}
+                  paddingX={1}
+                >
+                  {card(s.key, s.detail)}
+                </Box>
+              </Box>
+            ),
+          )}
         </Box>
+        {terminal
+          ? segments.map((s, i) => {
+              const rows = [s.detail.join(' · ')]
+              const w = hoverWidth(rows)
+              return (
+                <Box
+                  position="absolute"
+                  top={placed[i]?.row ?? 0}
+                  left={Math.max(0, Math.min(placed[i]?.col ?? 0, width - w))}
+                  width={w}
+                  display="none"
+                  hover={{ scope: `limits-${s.key}`, display: 'flex' }}
+                  backgroundColor={C.faint}
+                  paddingX={1}
+                >
+                  {card(s.key, rows)}
+                </Box>
+              )
+            })
+          : null}
       </Box>
     )
   })

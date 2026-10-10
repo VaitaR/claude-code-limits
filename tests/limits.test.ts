@@ -3,6 +3,10 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { fmtAt, fmtLeft, gaugeCells, lastRequestAt, mergeLimits, parseConfig, parseCostSplit, quotaLevel, splitLines } from '../hooks/core'
 
+// A terminal runs a hover's rows on as one line, joined by ` · `: there a row is a part of that line.
+const hoverRow = (surface: string, re: RegExp) =>
+  surface === 'terminal' ? new RegExp(`(?:^| · )${re.source.replace(/^\^|\$$/g, '')}(?: · |$)`) : re
+
 // ---------------------------------------------------------------- pure behaviour
 
 test('config is read leniently: bad values fall back to defaults', () => {
@@ -140,11 +144,11 @@ test('the band shows quotas, context and cache, running agents at the right, and
       for (const text of [/^5h $/, /^ 34%$/, /^ ↻$/, /^7d $/, /^ 92%$/, /^ctx $/, /^ 60%$/, /^━━━━$/, /^━━$/, /^cache $/, /^○ cold$/, /^◐ Explore$/,
         /^5h · 34% used, 66% left · resets \d\d:\d\d$/, /^7d · 92% used, 8% left$/, /^ctx · 120k of 200k tokens$/, /^cache · cold: the next prompt rewrites it$/,
         /^\$1\.00$/, /^session \$1\.00 at API prices, subagents included$/]) {
-        expect([surface, cols, String(text), await ui.find({ text })]).toEqual([surface, cols, String(text), expect.anything()])
+        expect([surface, cols, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, cols, String(text), expect.anything()])
       }
       // Running agents are a segment that wraps whole: squeezed at the right edge they read as `◐…`.
       expect([surface, cols, (await ui.find({ text: /^◐ Explore$/ }))?.props?.wrap]).toEqual([surface, cols, undefined])
-      expect([surface, cols, await ui.find({ text: /^1 subagent running$/ })]).toEqual([surface, cols, expect.anything()])
+      expect([surface, cols, await ui.find({ text: hoverRow(surface, /^1 subagent running$/) })]).toEqual([surface, cols, expect.anything()])
       // The reset clock is a Client on surfaces that have one, plain text otherwise.
       expect([surface, cols, (await ui.find({ key: 'band-reset-five_hour' })) ?? (await ui.find({ text: /^[34]h[0-5][0-9]m$/ }))]).toEqual([surface, cols, expect.anything()])
       // Shown elsewhere in the app, so not here.
@@ -197,7 +201,7 @@ test('a measurement without rate limits leaves the band quotas in place', async 
   await $.session.measure({ context: ctx, rateLimits: [], changed: ['rateLimits'] })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...band(120), surface })
-    for (const text of [/^5h $/, /^ 6%$/, /^7d $/, /^ 46%$/]) expect([surface, String(text), await ui.find({ text })]).toEqual([surface, String(text), expect.anything()])
+    for (const text of [/^5h $/, /^ 6%$/, /^7d $/, /^ 46%$/]) expect([surface, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, String(text), expect.anything()])
     await ui.unmount()
   }
 })
@@ -214,7 +218,7 @@ test('the band shows the session cost, and its hover adds what the last turn cos
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...band(120), surface })
     expect([surface, await ui.find({ text: /^\$2\.84$/ })]).toEqual([surface, expect.anything()])
-    for (const text of [/^session \$2\.84 at API prices, subagents included$/, /^\+\$0\.84 last turn$/]) expect([surface, String(text), await ui.find({ text })]).toEqual([surface, String(text), expect.anything()])
+    for (const text of [/^session \$2\.84 at API prices, subagents included$/, /^\+\$0\.84 last turn$/]) expect([surface, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, String(text), expect.anything()])
     await ui.unmount()
   }
 })
@@ -237,7 +241,7 @@ test('with a cost command, the cost hover splits the session by main thread and 
   expect(argvs).toContainEqual(['python3', '/x/session_cost.py', 'S-1'])
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...band(120), surface })
-    for (const text of [/^session \$5\.85 at API prices$/, /^\$5\.75 main$/, /^\$0\.10 Explore · map$/]) expect([surface, String(text), await ui.find({ text })]).toEqual([surface, String(text), expect.anything()])
+    for (const text of [/^session \$5\.85 at API prices$/, /^\$5\.75 main$/, /^\$0\.10 Explore · map$/]) expect([surface, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, String(text), expect.anything()])
     await ui.unmount()
   }
 })
@@ -327,7 +331,9 @@ test('several running subagents read as a count, named in the hover', async ($, 
   for (const t of ['Explore', 'Plan', 'ship-verifier']) await $.agent.spawn(spawn(t, 'x'))
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...band(120), surface })
-    for (const text of [/^◐ 3 agents$/, /^3 subagents running$/, /^Explore$/, /^Plan$/, /^ship-verifier$/]) expect([surface, String(text), await ui.find({ text })]).toEqual([surface, String(text), expect.anything()])
+    for (const text of [/^◐ 3 agents$/, /^3 subagents running$/, /^Explore$/, /^Plan$/, /^ship-verifier$/]) expect([surface, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, String(text), expect.anything()])
+    // A terminal clips a hover to the band's rows: there it is one line.
+    if (surface === 'terminal') expect(await ui.find({ text: /^3 subagents running · Explore · Plan · ship-verifier$/ })).toBeDefined()
     await ui.unmount()
   }
 })

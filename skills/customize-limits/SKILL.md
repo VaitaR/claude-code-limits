@@ -57,7 +57,7 @@ details belong in `detail`, the rows its hover shows.
    `types/index.d.ts`, write it with `update($, x, …)`. Hooks must pass their event on: `return next(e)`.
 2. **Logic.** Put formatting and thresholds in `core.ts` as pure functions, with a test.
 3. **Draw.** In the `AbovePrompt` hook, read the atom in the `Promise.all` and call
-   `add('my-key', <Text …>…</Text>, ['first hover row', 'more rows'])`.
+   `add('my-key', <Text …>…</Text>, ['first hover row', 'more rows'], 'the segment as plain text')`.
 4. **Test** (below), then end the turn and look at it at a narrow and a wide window.
 
 ## Test
@@ -77,6 +77,11 @@ then `ui.find({ text: /…/ })` or `ui.find({ key })`. Follow the existing tests
   in the app. The desktop app sets text in a proportional font, so widths counted in characters are
   approximate: put the important part of a row first (the amount before the description).
 - **A hover box needs an explicit width.** Unsized, it takes its segment's width and truncates.
+- **A terminal paints in tree order and clips a hover to the band's rows.** A hover drawn inside its segment
+  lay under the segments after it. So in a terminal the hovers are one row each, drawn after every segment at
+  the cell the band's wrap gives them, and lit through `hover.scope`. A new segment passes its text as
+  `add`'s last argument: that is how its width, and every later hover's place, is known. Check a hover change
+  in a real terminal: `tmux send-keys -l $'\e[<35;COL;ROWM'` moves the pointer, `tmux capture-pane -p` reads it.
 - **Never declare a variable named `on`** (or `$`, `next`) inside `register`: the module fails to load.
 - **Engine stubs in a test are registered before the first `$` call**, and must return the fields the
   event requires (a `session.end` stub returns `{ sessionId }`); the error message names the missing one.

@@ -49,6 +49,8 @@ Mods are an early-access Claude Code feature and their API can change between re
 | **`$0.20`** | the session's cost at API prices, subagents included | the last turn's cost; with a [`costCommand`](#configure), the main thread and each subagent a row apiece |
 | **`◐ Explore`** | subagents running now: the type of one, `◐ 3 agents` for several | their types |
 
+In the desktop app a hover lists its rows; a terminal shows it as one line, moved left when it would run past the edge.
+
 **Quiet until it matters.** The line stays grey and white while all is well. Colour marks only what needs attention:
 
 | | Amber | Red |
