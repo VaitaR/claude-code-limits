@@ -381,14 +381,14 @@ export const register: Register = (on, options) => {
       ))
 
     // A terminal paints in tree order, so a hover drawn inside its segment lay under the segments after
-    // it, and it clips a hover to the band's own rows, so none can sit above the band. There a hover is a
-    // row of its own under the segments, revealed in the flow: the band grows by it while lit, and on a
-    // full screen scrolls up, which puts the row under the pointer and keeps it lit. A box at the segment,
-    // shifted left to fit, sat flush on its neighbours' text. With no row to spare under `maxRows` the
-    // hover covers its segment's whole row instead, which the band's wrap gives (its cells are known in a
-    // terminal). The segment lights its hover through a scope.
+    // it, and it clips a hover to the band's own rows, so none can sit above the band. There the band keeps
+    // a blank row under its segments, and a hover is drawn in it under its segment, shifted left to fit:
+    // laid over the band's row it sat flush on the neighbours' text, and revealed as a row in the flow it
+    // made the band jump. With no row to spare under `maxRows` the hover covers its segment's whole row.
+    // Both places come from the band's wrap (its cells are known in a terminal). The segment lights its
+    // hover through a scope.
     const terminal = e.surface === 'terminal'
-    const placed: number[] = []
+    const placed: { row: number; col: number }[] = []
     let row = 0
     let col = 0
     for (const s of segments) {
@@ -397,7 +397,7 @@ export const register: Register = (on, options) => {
         row += 1
         col = 0
       }
-      placed.push(row)
+      placed.push({ row, col })
       col += room
     }
 
@@ -426,7 +426,7 @@ export const register: Register = (on, options) => {
         detail: [lp.at !== null ? `last prompt · sent ${fmtAt(lp.at, now)}` : 'last prompt', shorten(lp.text, 400)],
         cells,
       })
-      placed.push(row)
+      placed.push({ row, col })
     }
     const under = row + 2 <= e.props.maxRows
 
@@ -461,19 +461,35 @@ export const register: Register = (on, options) => {
             ),
           )}
         </Box>
-        {terminal
-          ? segments.map((s, i) =>
-              under ? (
-                <Box key={`hover-${s.key}`} width={width} display="none" hover={{ scope: `limits-${s.key}`, display: 'flex' }}>
-                  <Text color={C.dim} wrap="truncate">
-                    {s.detail.join(' · ')}
-                  </Text>
-                </Box>
-              ) : (
+        {terminal && under ? (
+          <Box key="hover-row" height={1} width={width}>
+            {segments.map((s, i) => {
+              const line = s.detail.join(' · ')
+              const w = Math.min([...line].length, width)
+              return (
                 <Box
                   key={`hover-${s.key}`}
                   position="absolute"
-                  top={placed[i] ?? 0}
+                  top={0}
+                  left={Math.max(0, Math.min(placed[i]?.col ?? 0, width - w))}
+                  width={w}
+                  display="none"
+                  hover={{ scope: `limits-${s.key}`, display: 'flex' }}
+                >
+                  <Text color={C.dim} wrap="truncate">
+                    {line}
+                  </Text>
+                </Box>
+              )
+            })}
+          </Box>
+        ) : null}
+        {terminal && !under
+          ? segments.map((s, i) => (
+                <Box
+                  key={`hover-${s.key}`}
+                  position="absolute"
+                  top={placed[i]?.row ?? 0}
                   left={0}
                   width={width}
                   display="none"
@@ -483,8 +499,7 @@ export const register: Register = (on, options) => {
                 >
                   {card(s.key, [s.detail.join(' · ')])}
                 </Box>
-              ),
-            )
+            ))
           : null}
       </Box>
     )

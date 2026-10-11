@@ -435,21 +435,23 @@ test('the last prompt never makes the band taller than it may be', async ($, on)
   }
 })
 
-test('a terminal hover is a row under the band, or with none to spare covers its segment\'s whole row', async ($, on) => {
+test('a terminal hover sits in a kept row under its segment, or with none to spare covers the segment\'s row', async ($, on) => {
   engine(on)
   on('prompt.submit', (_$, e) => ({ text: e.text }))
-  await $.prompt.submit(submit('a prompt long enough to want a row of its own in a narrow band', { kind: 'composer' }))
-  // At 40 columns the prompt wraps to row 1; `cache ○ cold` stays on row 0.
-  for (const [maxRows, cache, prompt] of [
-    [10, [undefined, undefined, undefined, 40], [undefined, undefined, undefined, 40]],
-    [2, ['absolute', 0, 0, 40], ['absolute', 1, 0, 40]],
+  await $.prompt.submit(submit('ping', { kind: 'composer' }))
+  // `cache ○ cold` at column 0, `❯ ping` at 14; the prompt's hover (31 cells) is shifted left to fit 40.
+  const prompt = 'last prompt · sent 00:00 · ping'.length
+  for (const [maxRows, row, cache, ping] of [
+    // The cache's 41 cells are capped at the band's 40.
+    [10, true, [0, 0, 40], [0, 40 - prompt, prompt]],
+    [1, false, [0, 0, 40], [0, 0, 40]],
   ] as const) {
     const ui = await $.ui.mount({ ...band(40), props: { ...band(40).props, maxRows }, surface: 'terminal' })
     const at = async (key: string) => {
       const p = (await ui.find({ key }))?.props
-      return [p?.position, p?.top, p?.left, p?.width]
+      return [p?.top, p?.left, p?.width]
     }
-    expect([maxRows, await at('hover-cache'), await at('hover-prompt')]).toEqual([maxRows, cache, prompt])
+    expect([maxRows, (await ui.find({ key: 'hover-row' })) !== undefined, await at('hover-cache'), await at('hover-prompt')]).toEqual([maxRows, row, cache, ping])
     await ui.unmount()
   }
 })

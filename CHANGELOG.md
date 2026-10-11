@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.5
+
+- The band keeps a blank row under itself in a terminal, and a hover shows there below its segment: nothing jumps when the pointer moves on, and the details are where you look.
+
 ## 0.7.4
 
 - A terminal hover is a row of its own under the band and covers nothing; only a band with no row to spare still draws it over the segment's row.
