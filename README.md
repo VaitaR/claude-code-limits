@@ -6,7 +6,7 @@
 **Know how much room you have left before the next prompt.** A Claude Code mod that puts your 5h and 7d quota, context, prompt-cache time and session cost on one line above the prompt, with the subagents still running and what you last asked. It works in the terminal and the desktop app; hover a segment for details.
 
 <p align="center">
-  <img src="docs/media/demo.gif" alt="A Claude Code session in the terminal. A prompt asks for an Explore subagent; the line above the prompt shows the cache as live during the turn, then the running Explore agent, whose hover reads 1 subagent running. Once the turn ends the prompt shows under the line. Hovering 5h, 7d, ctx, cache and the cost in turn shows each one's details, the cost split into main thread and subagent" width="760">
+  <img src="docs/media/demo.gif" alt="A Claude Code session in the terminal. A prompt asks for an Explore subagent; the line above the prompt shows the cache as live during the turn, then the running Explore agent, whose hover reads 1 subagent running. The last prompt has a row under the line. Hovering 5h, 7d, ctx, cache and the cost in turn shows each one's details on the row below, under the segment, the cost split into main thread and subagent" width="760">
 </p>
 
 <p align="center">

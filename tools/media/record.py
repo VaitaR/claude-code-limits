@@ -1,8 +1,8 @@
 """Record the README demo: drive Claude Code in tmux and save ANSI frames with hold times.
 
 Usage:
-  tmux new-session -d -s gif -x 100 -y 24 -c <this repo> \
-      "CLAUDE_CODE_PLUGIN_DIRS=<this repo> claude"
+  tmux new-session -d -s gif -x 100 -y 30 -c <this repo> \
+      "CLAUDE_CODE_PLUGIN_DIRS=<this repo> claude"   # at 24 rows a turn leaves the band no hover row
   tmux set -g focus-events on       # else Claude Code shows a tip about it above the prompt
   python3 record.py frames/          # one turn with an Explore subagent, then a hover per segment
 
