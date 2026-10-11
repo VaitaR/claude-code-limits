@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.4
+
+- A terminal hover is a row of its own under the band and covers nothing; only a band with no row to spare still draws it over the segment's row.
+
 ## 0.7.3
 
 - A terminal hover takes its segment's whole row: shifted left to fit, it sat flush on the segments beside it.

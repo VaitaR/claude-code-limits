@@ -381,10 +381,12 @@ export const register: Register = (on, options) => {
       ))
 
     // A terminal paints in tree order, so a hover drawn inside its segment lay under the segments after
-    // it, and it clips a hover to the band's own rows. There each hover is drawn after every segment and
-    // covers the whole row the band's wrap puts its segment on (its cells are known in a terminal): a box
-    // at the segment, shifted left to fit, sat flush on its neighbours' text. The segment lights its
-    // hover through a scope.
+    // it, and it clips a hover to the band's own rows, so none can sit above the band. There a hover is a
+    // row of its own under the segments, revealed in the flow: the band grows by it while lit, and on a
+    // full screen scrolls up, which puts the row under the pointer and keeps it lit. A box at the segment,
+    // shifted left to fit, sat flush on its neighbours' text. With no row to spare under `maxRows` the
+    // hover covers its segment's whole row instead, which the band's wrap gives (its cells are known in a
+    // terminal). The segment lights its hover through a scope.
     const terminal = e.surface === 'terminal'
     const placed: number[] = []
     let row = 0
@@ -426,9 +428,10 @@ export const register: Register = (on, options) => {
       })
       placed.push(row)
     }
+    const under = row + 2 <= e.props.maxRows
 
     return (
-      <Box width={width}>
+      <Box width={width} flexDirection={terminal ? 'column' : 'row'}>
         <Box flexWrap="wrap" flexShrink={1}>
           {/* The gap trails each segment: a wrapped row then starts flush, where a leading `│` read as a stray mark. */}
           {segments.map(s =>
@@ -459,9 +462,14 @@ export const register: Register = (on, options) => {
           )}
         </Box>
         {terminal
-          ? segments.map((s, i) => {
-              const rows = [s.detail.join(' · ')]
-              return (
+          ? segments.map((s, i) =>
+              under ? (
+                <Box key={`hover-${s.key}`} width={width} display="none" hover={{ scope: `limits-${s.key}`, display: 'flex' }}>
+                  <Text color={C.dim} wrap="truncate">
+                    {s.detail.join(' · ')}
+                  </Text>
+                </Box>
+              ) : (
                 <Box
                   key={`hover-${s.key}`}
                   position="absolute"
@@ -473,10 +481,10 @@ export const register: Register = (on, options) => {
                   backgroundColor={C.faint}
                   paddingX={1}
                 >
-                  {card(s.key, rows)}
+                  {card(s.key, [s.detail.join(' · ')])}
                 </Box>
-              )
-            })
+              ),
+            )
           : null}
       </Box>
     )
