@@ -5,7 +5,10 @@ import type { LastPrompt, Running, Usage } from '../types'
 import {
   DEFAULT_USAGE,
   PALETTES,
+  activityOf,
+  agentLines,
   contextOf,
+  contextTokens,
   fmtAt,
   fmtCacheLeft,
   fmtLeft,
@@ -45,6 +48,10 @@ async function getUsage($: EngineInterface): Promise<Usage> {
 }
 async function getRunning($: EngineInterface): Promise<Running[]> {
   return listOf<Running>(await read($, running))
+}
+/** Changes one running agent; an id not in the list (spawned before a reload) changes nothing. */
+async function touch($: EngineInterface, id: string, f: (a: Running) => Running) {
+  await update($, running, list => listOf<Running>(list).map(a => (a.id === id ? f(a) : a)))
 }
 async function getLastPrompt($: EngineInterface): Promise<LastPrompt | null> {
   const p = (await read($, lastPrompt)) as Partial<LastPrompt> | null
@@ -186,11 +193,25 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId) return yield* next(e)
-    const sentAt = await $.clock.now()
+    const id = e.agentId
+    const sentAt = id ? 0 : await $.clock.now()
     const done = yield* next(e)
-    if (done.usage) await update($, cacheAt, () => sentAt)
+    const u = done.usage
+    if (u && id) await touch($, id, a => ({ ...a, model: u.model || a.model, tokens: contextTokens(u) }))
+    else if (u) await update($, cacheAt, () => sentAt)
     return done
+  })
+
+  // Counted when a call starts, so the activity is what the agent is doing now. A failed write must not
+  // fail the agent's tool.
+  on('tool.call', async ($, e, next) => {
+    const id = e.agentId
+    if (id) {
+      await touch($, id, a => ({ ...a, tools: (a.tools ?? 0) + 1, activity: activityOf(e.tool, e as unknown as Record<string, unknown>) })).catch(
+        () => undefined,
+      )
+    }
+    return next(e)
   })
 
   on('session.measure', async ($, e, next) => {
@@ -225,7 +246,13 @@ export const register: Register = (on, options) => {
   on('agent.spawn', async ($, e, next) => {
     const started = await next(e)
     if (started.deny !== undefined || !started.agentId) return started
-    const agent: Running = { id: started.agentId, type: e.name ?? e.subagentType }
+    const agent: Running = {
+      id: started.agentId,
+      type: e.name ?? e.subagentType,
+      description: e.description || undefined,
+      model: started.model || undefined,
+      startedAt: await $.clock.now(),
+    }
     await update($, running, list => [...listOf<Running>(list).filter(a => a.id !== agent.id), agent].slice(-24))
     return started
   })
@@ -362,11 +389,7 @@ export const register: Register = (on, options) => {
       add(
         'agents',
         <Text color={C.agent}>{label}</Text>,
-        [
-          `${plural(agents.length, 'subagent')} running`,
-          ...agents.slice(0, 6).map(a => a.type),
-          ...(agents.length > 6 ? [`+${agents.length - 6} more`] : []),
-        ],
+        agentLines(agents, now),
         label,
       )
     }

@@ -1,5 +1,5 @@
 // Pure data: defaults, config, formatting. Nothing here touches `$`, so every behaviour is testable directly.
-import type { CostSplit, Usage } from '../types'
+import type { CostSplit, Running, Usage } from '../types'
 
 // ---------------------------------------------------------------- defaults
 
@@ -175,6 +175,60 @@ export const splitLines = (s: CostSplit, max = 6) => {
   const more = rest.length > 0 ? [`${fmtUsd(rest.reduce((n, a) => n + a.usd, 0))} +${rest.length} more`] : []
   const miss = s.unpriced > 0 ? [`${plural(s.unpriced, 'call')} unpriced`] : []
   return [`${fmtUsd(s.mainUsd)} main`, ...named, ...more, ...miss]
+}
+
+// ---------------------------------------------------------------- running agents
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+/** `claude-sonnet-5-5` → `Sonnet 5.5`, `claude-haiku-4-5-20251001` → `Haiku 4.5`; an alias capitalised; any other id as given. */
+export const modelLabel = (id: string) => {
+  const m = /claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?!\d)/i.exec(id)
+  if (m?.[1] && m[2]) return `${cap(m[1].toLowerCase())} ${m[2]}${m[3] ? `.${m[3]}` : ''}`
+  return /^[a-z]+$/.test(id) ? cap(id) : id
+}
+
+/** `45s`, `1m59s`, `1h02m`. */
+export const fmtElapsed = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  return m < 60 ? `${m}m${String(s % 60).padStart(2, '0')}s` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`
+}
+
+/** A tool call as Claude Code shows one: `Bash(run the tests)`, `Read(core.ts)`, `Grep(fmtAt)`; the tool alone when no argument names it. */
+export const activityOf = (tool: string, args: Readonly<Record<string, unknown>>) => {
+  const s = (k: string) => (typeof args[k] === 'string' ? (args[k] as string) : '')
+  const file = s('file_path') || s('notebook_path')
+  const what =
+    tool === 'Bash'
+      ? s('description') || s('command')
+      : file
+        ? (file.split('/').filter(Boolean).pop() ?? file)
+        : s('description') || s('pattern') || s('query') || s('url') || s('path')
+  return what ? `${tool}(${shorten(what, 40)})` : tool
+}
+
+/** A request's context: what it sent plus what it got back, as the desktop app's agent card counts tokens. */
+export const contextTokens = (u: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }) =>
+  u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens + u.output_tokens
+
+/**
+ * Two rows per agent: what it is doing, then how far it got. Each part is left out until its event has
+ * been seen, so an agent spawned before a reload reads as its type alone.
+ */
+export const agentLines = (agents: readonly Running[], now: number, max = 4) => {
+  const rows = agents.slice(0, max).flatMap(a => {
+    const facts = [
+      typeof a.startedAt === 'number' ? fmtElapsed(now - a.startedAt) : '',
+      a.model ? modelLabel(a.model) : '',
+      a.tokens ? `${kTokens(a.tokens)} ctx` : '',
+      a.tools ? plural(a.tools, 'tool') : '',
+      a.activity ?? '',
+    ].filter(Boolean)
+    return [`${a.type}${a.description ? ` · ${shorten(a.description, 48)}` : ''}`, ...(facts.length > 0 ? [facts.join(' · ')] : [])]
+  })
+  return [`${plural(agents.length, 'subagent')} running`, ...rows, ...(agents.length > max ? [`+${agents.length - max} more`] : [])]
 }
 
 // ---------------------------------------------------------------- cache clock

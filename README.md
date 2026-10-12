@@ -51,7 +51,7 @@ Hovering a segment shows its details: the desktop app lists them as rows, a term
 | **`ctx`** | context against the window Claude Code compacts at; `⟲3` after three compactions | `ctx · 31k of 258k tokens · 3 compactions` |
 | **`cache`** | `● live` while a turn runs, then `● 59m`, the minutes the prompt cache has left (seconds in its last minute), and `○ cold` once it has none | `cache · warm until 16:31 (1h TTL)` |
 | **`$0.20`** | the session's cost at API prices, subagents included | `session $0.20 at API prices, subagents included`, then the last turn's cost; with a [`costCommand`](#configure), rows for the main thread and the subagents |
-| **`◐ Explore`** | the subagents running now: the type of one, `◐ 3 agents` for several | `1 subagent running · Explore` |
+| **`◐ Explore`** | the subagents running now: the type of one, `◐ 3 agents` for several | `1 subagent running`, then per agent its type and task, and a row with how long it has run, its model, its last request's context, its tool calls so far and the latest one: `1m59s · Sonnet 5.5 · 156k ctx · 48 tools · Bash(Find RPC clients)` |
 | **`❯ fix the flaky…`** | your last prompt, in the room the line has left and cut with `…`; with less than 40 cells left, on a row of its own when there is room for one | `last prompt · sent 16:18`, then the prompt in full |
 
 **Quiet until it matters.** While all is well the gauges, cache and cost stay in plain text colours. Amber and red mark what needs attention:
@@ -116,10 +116,11 @@ The plugin ships a skill, **`customize-limits`**, that knows where each threshol
 | It reads | Through |
 | --- | --- |
 | context, cost and rate-limit readings | `session.measure`, `$.session.usage()` |
-| when the main loop's requests are sent and answered | `turn.step` |
+| when the main loop's requests are sent and answered; a subagent's model and token counts per request | `turn.step` |
+| a subagent's tool calls: the tool and the argument that names its target (a Bash call's description or command, a file's name, a search pattern) | `tool.call` |
 | the text of your own prompts: typed, from the desktop app or Remote Control, never a notification's or another plugin's | `prompt.submit` |
 | compactions | `session.compact` |
-| subagent spawns and ends (type only) | `agent.spawn`, `turn.complete` |
+| subagent spawns and ends: type, description, model | `agent.spawn`, `turn.complete` |
 | the tail of this session's transcript, at session start while no request or prompt has been seen yet, to start the cache clock and show the last prompt Claude Code recorded | `sh -c tail -c 400000 ~/.claude/projects/*/<session id>.jsonl` |
 | your `costCommand`'s output, if you set one | `$.process.run` |
 

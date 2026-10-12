@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0
+
+- The running-agents hover shows each subagent's task, how long it has run, its model, its last request's context, its tool calls so far and the latest one, like the desktop app's agent cards.
+
 ## 0.7.5
 
 - The band keeps a blank row under itself in a terminal, and a hover shows there below its segment: nothing jumps when the pointer moves on, and the details are where you look.

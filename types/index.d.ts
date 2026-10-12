@@ -13,8 +13,25 @@ export type Usage = {
   compactWindow: number | null
 }
 
-/** A subagent running now, by the id its spawn returned. */
-export type Running = { id: string; type: string }
+/**
+ * A subagent running now, by the id its spawn returned. The rest is optional: a value saved before they
+ * existed still reads, and each is set only once its event was seen.
+ */
+export type Running = {
+  id: string
+  type: string
+  /** The Agent call's few-word `description`. */
+  description?: string
+  /** The model its last request was answered by, else the one its spawn resolved. */
+  model?: string
+  startedAt?: number
+  /** Its last request's context: sent plus answered tokens. */
+  tokens?: number
+  /** Tool calls its loop has started. */
+  tools?: number
+  /** Its latest tool call, as `activityOf` names it. */
+  activity?: string
+}
 
 /** A session's cost split by transcript, as the `costCommand` priced it when `at`. */
 export type CostSplit = {

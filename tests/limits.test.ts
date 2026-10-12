@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { fmtAt, fmtCacheLeft, fmtLeft, gaugeCells, lastPromptOf, lastRequestAt, mergeLimits, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
+import { activityOf, agentLines, fmtAt, fmtCacheLeft, fmtElapsed, fmtLeft, gaugeCells, modelLabel, lastPromptOf, lastRequestAt, mergeLimits, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
 
 // The type lib is es2023 alone; the test runtime has timers.
 declare function setTimeout(fn: (value?: unknown) => void, ms: number): unknown
@@ -55,6 +55,21 @@ test('a cost split reads costCommand output and names the costliest agents', () 
   expect(splitLines({ ...sp!, agents: [], unpriced: 2 })).toEqual(['$5.75 main', '2 calls unpriced'])
   expect(parseCostSplit('{"error": "no transcript"}', 7)).toBe(null)
   expect(parseCostSplit('not json', 7)).toBe(null)
+})
+
+test('a running agent reads as its model, elapsed time and latest tool call', () => {
+  expect(['claude-sonnet-5-5', 'claude-haiku-4-5-20251001', 'claude-opus-4-20250514', 'claude-opus-5-5[1m]', 'haiku', 'gpt-x'].map(modelLabel)).toEqual(['Sonnet 5.5', 'Haiku 4.5', 'Opus 4', 'Opus 5.5', 'Haiku', 'gpt-x'])
+  expect([45_400, 119_000, 3_720_000].map(fmtElapsed)).toEqual(['45s', '1m59s', '1h02m'])
+  expect([
+    activityOf('Bash', { command: 'npm test', description: 'Run the tests' }),
+    activityOf('Bash', { command: 'ls' }),
+    activityOf('Read', { file_path: '/w/hooks/core.ts' }),
+    activityOf('Grep', { pattern: 'fmtAt' }),
+    activityOf('TodoWrite', { todos: [] }),
+  ]).toEqual(['Bash(Run the tests)', 'Bash(ls)', 'Read(core.ts)', 'Grep(fmtAt)', 'TodoWrite'])
+  const a = { id: 'a', type: 'Explore', description: 'map', model: 'claude-sonnet-5-5', startedAt: 1_000, tokens: 156_000, tools: 48, activity: 'Bash(ls)' }
+  expect(agentLines([a, { id: 'b', type: 'Plan' }], 120_000)).toEqual(['2 subagents running', 'Explore · map', '1m59s · Sonnet 5.5 · 156k ctx · 48 tools · Bash(ls)', 'Plan'])
+  expect(agentLines([a, a, a], 120_000, 1).slice(-1)).toEqual(['+2 more'])
 })
 
 test('a gauge shows one cell for any use, none for zero', () => {
@@ -342,12 +357,39 @@ test('several running subagents read as a count, named in the hover', async ($, 
   let n = 0
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: `m${++n}` }))
   await $.turn.start({ text: 'go', turnId: 'M1' })
-  for (const t of ['Explore', 'Plan', 'ship-verifier']) await $.agent.spawn(spawn(t, 'x'))
+  for (const t of ['Explore', 'Plan', 'ship-verifier']) await $.agent.spawn(spawn(t, `${t} task`))
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...band(120), surface })
-    for (const text of [/^◐ 3 agents$/, /^3 subagents running$/, /^Explore$/, /^Plan$/, /^ship-verifier$/]) expect([surface, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, String(text), expect.anything()])
+    for (const text of [/^◐ 3 agents$/, /^3 subagents running$/, /^Explore · Explore task$/, /^Plan · Plan task$/, /^ship-verifier · ship-verifier task$/, /^0s · Sonnet 5\.5$/]) expect([surface, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, String(text), expect.anything()])
     // A terminal clips a hover to the band's rows: there it is one line.
-    if (surface === 'terminal') expect(await ui.find({ text: /^3 subagents running · Explore · Plan · ship-verifier$/ })).toBeDefined()
+    if (surface === 'terminal') expect(await ui.find({ text: /^3 subagents running · Explore · Explore task · 0s · Sonnet 5\.5 · Plan · Plan task · / })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('a running subagent\'s hover shows its time, model, context, tool count and latest tool call', async ($, on) => {
+  const clock = mock.clock(on)
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'w1' }))
+  on('tool.call', () => ({ ref: 0, result: {}, text: '' }) as never)
+  on('turn.step', async function* (_$, e) {
+    const usage = { model: 'claude-haiku-4-5-20251001', input_tokens: 2_000, output_tokens: 1_000, cache_creation_input_tokens: 3_000, cache_read_input_tokens: 150_000 }
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage } as never
+  })
+  await $.turn.start({ text: 'go', turnId: 'W1' })
+  await $.agent.spawn(spawn('Explore', 'Map repo RPC client implementations'))
+  for await (const _ of $.turn.step({ turnId: 'WA', index: 0, model: 'claude-haiku-4-5', messageCount: 1, agentId: 'w1' })) void _
+  await $.tool.call({ tool: 'Read', file_path: '/w/hooks/core.ts', agentId: 'w1' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'rg -n rpc', description: 'Find RPC clients', agentId: 'w1' } as never)
+  // The main loop's own calls are not the agent's.
+  await $.tool.call({ tool: 'Read', file_path: '/w/README.md' } as never)
+  await clock.advance(119_000)
+  await $.turn.start({ text: 'again', turnId: 'W2' }) // any write redraws
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...band(160), surface })
+    for (const text of [/^Explore · Map repo RPC client implementations$/, /^1m59s · Haiku 4\.5 · 156k ctx · 2 tools · Bash\(Find RPC clients\)$/]) {
+      expect([surface, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, String(text), expect.anything()])
+    }
     await ui.unmount()
   }
 })
