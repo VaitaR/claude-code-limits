@@ -86,6 +86,10 @@ then `ui.find({ text: /…/ })` or `ui.find({ key })`. Follow the existing tests
   made the band jump. A new segment passes its text as `add`'s last argument: that is how its
   width, and every later segment's row, is known. Check a hover change
   in a real terminal with the tmux recipe in [AGENTS.md](../../AGENTS.md) "Done means".
+- **A band taller than `e.props.maxRows` is folded whole into an `n more` row**, hiding every segment, not
+  just the last row. A segment that can add a row (a longer text, a new row-starting segment) must stay
+  within `maxRows`: guard it like the prompt does in `hooks/register.tsx` (`row + 2 <= e.props.maxRows`)
+  and check the band at a narrow width while a turn runs.
 - **Never declare a variable named `on`** (or `$`, `next`) inside `register`: the module fails to load.
 - **Engine stubs in a test are registered before the first `$` call**, and must return the fields the
   event requires (a `session.end` stub returns `{ sessionId }`); the error message names the missing one.
