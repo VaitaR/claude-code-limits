@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { activityOf, agentLines, fmtAt, fmtCacheLeft, fmtElapsed, fmtLeft, gaugeCells, modelLabel, lastPromptOf, lastRequestAt, mergeLimits, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
+import { activityOf, agentLines, fmtAt, fmtCacheLeft, fmtElapsed, fmtLeft, gaugeCells, modelLabel, freshLimits, lastContextOf, lastPromptOf, lastRequestAt, mergeLimits, newestLimits, parseQuota, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
 
 // The type lib is es2023 alone; the test runtime has timers.
 declare function setTimeout(fn: (value?: unknown) => void, ms: number): unknown
@@ -38,6 +38,24 @@ test('a reading without a window keeps the last one until it resets', () => {
   expect(mergeLimits([h5, d7], [], 1_000)).toEqual([h5, d7])
   expect(mergeLimits([h5, d7], [{ ...d7, pct: 47 }], 1_000)).toEqual([h5, { ...d7, pct: 47 }]) // order holds
   expect(mergeLimits([h5, d7], [], 6_000)).toEqual([d7]) // the 5h window reset: its old reading is gone
+})
+
+test('a window past its reset is not drawn, and the newest reading of each window wins across sessions', () => {
+  const h5 = { kind: 'five_hour', pct: 6, resetsAt: 5_000, at: 100 }
+  const d7 = { kind: 'seven_day', pct: 46, resetsAt: 9_000, at: 100 }
+  expect(freshLimits([h5, d7], 6_000)).toEqual([d7])
+  const other = [{ ...h5, pct: 30, at: 200 }, { ...d7, pct: 40, at: 50 }]
+  expect(newestLimits([d7, h5], other, 1_000)).toEqual([other[0], d7]) // per window, ranked 5h first
+  expect(newestLimits([h5], other, 6_000)).toEqual([other[1]]) // a reset window is dropped from both
+  expect(newestLimits([{ kind: 'five_hour', pct: 1 }], [h5], 1_000)).toEqual([h5]) // a reading without `at` loses
+})
+
+test('the shared quota file is read leniently', () => {
+  const ok = { kind: 'five_hour', pct: 6, resetsAt: 5_000, at: 100 }
+  expect(parseQuota(JSON.stringify({ limits: [ok, { kind: 'seven_day', pct: 'x', at: 1 }, { kind: 'x', pct: 1 }] }))).toEqual([ok])
+  expect(parseQuota(JSON.stringify({ limits: [{ ...ok, resetsAt: undefined }] }))).toEqual([{ ...ok, resetsAt: null }])
+  expect(parseQuota('not json')).toEqual([])
+  expect(parseQuota('[]')).toEqual([])
 })
 
 test('a cost split reads costCommand output and names the costliest agents', () => {
@@ -87,6 +105,15 @@ test('the cache reads in minutes, then seconds in its last minute', () => {
 const row = (o: Record<string, unknown>) => JSON.stringify(o)
 const reply = (id: string, ts: string, extra: Record<string, unknown> = {}) =>
   row({ type: 'assistant', isSidechain: false, timestamp: ts, message: { id, usage: { input_tokens: 1 } }, ...extra })
+
+test('a restarted process reads the main loop\'s last context from the transcript', () => {
+  const usage = { input_tokens: 10, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 5_000, output_tokens: 1_000 }
+  const main = row({ type: 'assistant', isSidechain: false, message: { id: 'm1', usage } })
+  const side = row({ type: 'assistant', isSidechain: true, message: { id: 's1', usage: { input_tokens: 7 } } })
+  expect(lastContextOf(['x', main, side].join('\n'))).toBe(96_010) // a subagent's row is skipped
+  expect(lastContextOf(['x', main, row({ type: 'system', subtype: 'compact_boundary' })].join('\n'))).toBe(null)
+  expect(lastContextOf(main)).toBe(null) // a tail's first line is cut
+})
 
 test('the cache clock is seeded from the request that fed the last main-loop response', () => {
   const tail = [
@@ -172,7 +199,7 @@ test('the band shows quotas, context and cache, running agents at the right, and
     for (const cols of [40, 120]) {
       const ui = await $.ui.mount({ ...band(cols), surface })
       for (const text of [/^5h $/, /^ 34%$/, /^ ↻$/, /^7d $/, /^ 92%$/, /^ctx $/, /^ 60%$/, /^━━━━$/, /^━━$/, /^cache $/, /^○ cold$/, /^◐ Explore$/,
-        /^5h · 34% used, 66% left · resets \d\d:\d\d$/, /^7d · 92% used, 8% left$/, /^ctx · 120k of 200k tokens$/, /^cache · cold: the next prompt rewrites it$/,
+        /^5h · 34% used, 66% left · resets \d\d:\d\d · read \d\d:\d\d$/, /^7d · 92% used, 8% left · read \d\d:\d\d$/, /^ctx · 120k of 200k tokens$/, /^cache · cold: the next prompt rewrites it$/,
         /^\$1\.00$/, /^session \$1\.00 at API prices, subagents included$/]) {
         expect([surface, cols, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, cols, String(text), expect.anything()])
       }
@@ -508,4 +535,96 @@ test('a short prompt shows whole, even in less room than a cut one needs', async
     expect([cols, (await ui.find({ key: 'band-prompt' }))?.props?.width, await ui.find({ text: /^❯ ping$/ })]).toEqual([cols, 6, expect.anything()])
     await ui.unmount()
   }
+})
+
+// ---------------------------------------------------------------- shared quota
+
+/** A config directory's quota file, as `fs.read`/`fs.write` see it. */
+const quotaFile = (on: On, initial?: string) => {
+  const file = { text: initial, writes: 0 }
+  on('env.get', (_$, e) => ({ value: e.name === 'HOME' ? '/h' : undefined }))
+  on('fs.read', (_$, e) => {
+    if (e.path !== '/h/.claude/state/limits/quota.json' || file.text === undefined) throw new Error('ENOENT')
+    return { value: file.text }
+  })
+  on('fs.write', (_$, e) => {
+    if (e.path === '/h/.claude/state/limits/quota.json') {
+      file.text = e.text
+      file.writes++
+    }
+    return { value: undefined }
+  })
+  return file
+}
+
+test('a session with no reading of its own shows the latest one another session wrote', async ($, on) => {
+  const clock = mock.clock(on)
+  await clock.advance(60_000)
+  const H = 3_600_000
+  const at = clock.now() - 10 * 60_000
+  quotaFile(on, JSON.stringify({ limits: [{ kind: 'five_hour', pct: 41, resetsAt: clock.now() + H, at }, { kind: 'seven_day', pct: 12, resetsAt: clock.now() - 1, at }] }))
+  on('ui.status', () => ({ value: undefined }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  on('session.id', () => ({ value: 'abc-123' }))
+  on('process.run', () => ({ value: { exitCode: 0, stderr: '', stdout: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  await new Promise(r => setTimeout(r, 0))
+  const ui = await $.ui.mount({ ...band(120), surface: 'desktop' })
+  expect(await ui.find({ text: /^ 41%$/ })).toBeDefined()
+  expect(await ui.find({ text: /^7d $/ })).toBeUndefined() // its window reset since: no stale gauge
+  await ui.unmount()
+})
+
+test('a session\'s own reading goes to the shared file, unless the file holds a newer one', async ($, on) => {
+  const clock = mock.clock(on)
+  await clock.advance(60_000)
+  const H = 3_600_000
+  const file = quotaFile(on)
+  on('ui.status', () => ({ value: undefined }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  const ctx = { tokens: 1_000, window: 200_000, percent: 1 }
+  const resetsAt = new Date(clock.now() + H).toISOString()
+  await $.session.measure({ context: ctx, rateLimits: [{ kind: 'five_hour', percentUsed: 20, resetsAt }], changed: ['rateLimits'] })
+  await new Promise(r => setTimeout(r, 0))
+  expect(parseQuota(file.text ?? '')).toEqual([{ kind: 'five_hour', pct: 20, resetsAt: Date.parse(resetsAt), at: clock.now() }])
+  // Another session reads later and higher; ours, older, must not overwrite it.
+  file.text = JSON.stringify({ limits: [{ kind: 'five_hour', pct: 35, resetsAt: Date.parse(resetsAt), at: clock.now() + 1 }] })
+  const writes = file.writes
+  await $.session.measure({ context: ctx, rateLimits: [], changed: ['context'] })
+  await new Promise(r => setTimeout(r, 0))
+  expect(file.writes).toBe(writes)
+})
+
+test('a restarted process shows the context its transcript last recorded', async ($, on) => {
+  const clock = mock.clock(on)
+  await clock.advance(60_000)
+  quotaFile(on)
+  on('ui.status', () => ({ value: undefined }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  on('session.id', () => ({ value: 'abc-123' }))
+  const usage = { input_tokens: 10, cache_read_input_tokens: 100_000, cache_creation_input_tokens: 0, output_tokens: 0 }
+  const out = ['x', row({ type: 'assistant', isSidechain: false, timestamp: '2026-10-09T03:05:01.000Z', message: { id: 'm1', usage } })].join('\n')
+  on('process.run', () => ({ value: { exitCode: 0, stderr: '', stdout: out, isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...band(120), surface: 'desktop' })
+  expect(await ui.find({ text: /^ctx $/ })).toBeDefined()
+  expect(await ui.find({ text: /^ 50%$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a quota whose window reset while the session sat idle is no longer drawn', async ($, on) => {
+  const clock = mock.clock(on)
+  await clock.advance(60_000)
+  on('ui.status', () => ({ value: undefined }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  const ctx = { tokens: 1_000, window: 200_000, percent: 1 }
+  const resetsAt = new Date(clock.now() + 60_000).toISOString()
+  await $.session.measure({ context: ctx, rateLimits: [{ kind: 'five_hour', percentUsed: 88, resetsAt }, { kind: 'seven_day', percentUsed: 12 }], changed: ['rateLimits'] })
+  await clock.advance(2 * 60_000)
+  const ui = await $.ui.mount({ ...band(120), surface: 'desktop' })
+  expect(await ui.find({ text: /^ 88%$/ })).toBeUndefined()
+  expect(await ui.find({ text: /^ 12%$/ })).toBeDefined()
+  await ui.unmount()
 })

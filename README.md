@@ -121,15 +121,17 @@ The plugin ships a skill, **`customize-limits`**, that knows where each threshol
 | the text of your own prompts: typed, from the desktop app or Remote Control, never a notification's or another plugin's | `prompt.submit` |
 | compactions | `session.compact` |
 | subagent spawns and ends: type, description, model | `agent.spawn`, `turn.complete` |
-| the tail of this session's transcript, at session start while no request or prompt has been seen yet, to start the cache clock and show the last prompt Claude Code recorded | `sh -c tail -c 400000 ~/.claude/projects/*/<session id>.jsonl` |
+| the tail of this session's transcript, at session start while no request or prompt has been seen yet, to start the cache clock, show the last prompt Claude Code recorded and the context of the last response | `sh -c tail -c 400000 ~/.claude/projects/*/<session id>.jsonl` |
+| the latest 5h/7d readings of every session under the same config directory, and this session's own into it, every 30 s and at each reading | `$.fs` on `<config dir>/state/limits/quota.json` (`CLAUDE_CONFIG_DIR`, else `~/.claude`) |
 | your `costCommand`'s output, if you set one | `$.process.run` |
 
-It makes **no** network requests and calls no model; your `costCommand` runs as you wrote it. State lives in session atoms and ends with the session. `claude plugin validate .` prints exactly what it hooks and calls.
+It makes **no** network requests and calls no model; your `costCommand` runs as you wrote it. State lives in session atoms and ends with the session, except the quota file, which holds only the readings of the windows still open. `claude plugin validate .` prints exactly what it hooks and calls.
 
 ## What is inferred, not measured
 
 - **The cache clock** starts when the main loop's last answered request was sent and runs for `cacheTtl`. The engine reports no TTL, so a wrong `cacheTtl` gives a wrong clock. A compaction sets the cache to cold.
-- **Quotas are account-wide.** Parallel sessions spend the same windows, and the band shows the last reading this session received. A reading without a window keeps the previous one until it resets.
+- **Quotas are account-wide.** Parallel sessions spend the same windows, so every session shows the latest reading any of them received (the hover says when it was read): an idle session lags by up to 30 s behind a busy one, and with no session busy the figure is as old as the last response. A window past its reset is not drawn until the next reading. Sessions share readings through their config directory, so two accounts under two directories never mix.
+- **After a restart** (the desktop app stops a hidden session's process after a while idle, and starts it again when you come back) the context gauge shows the transcript's last response until the next one; the compaction count starts from zero.
 - **Cost is the engine's API-price figure.** On a subscription it is what the session would cost at API prices, not a bill.
 
 ## Develop

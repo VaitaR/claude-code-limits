@@ -2,6 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import type { LastPrompt, Running, Usage } from '../types'
+
+type Limit = Usage['limits'][number]
 import {
   DEFAULT_USAGE,
   PALETTES,
@@ -13,17 +15,21 @@ import {
   fmtCacheLeft,
   fmtLeft,
   fmtUsd,
+  freshLimits,
   gaugeCells,
   kTokens,
+  lastContextOf,
   lastPromptOf,
   lastRequestAt,
   limitLabel,
   limitsOf,
   listOf,
   mergeLimits,
+  newestLimits,
   normalize,
   parseConfig,
   parseCostSplit,
+  parseQuota,
   plural,
   promptLine,
   quotaLevel,
@@ -70,7 +76,8 @@ const numOr = <T,>(v: unknown, d: T): number | T => (typeof v === 'number' && Nu
 async function seedFromTranscript($: EngineInterface) {
   const needCache = numOr(await read($, cacheAt), 0) <= 0
   const needPrompt = (await getLastPrompt($)) === null
-  if (!needCache && !needPrompt) return
+  const needCtx = (await getUsage($)).tokens === null
+  if (!needCache && !needPrompt && !needCtx) return
   const id = await $.session.id().catch(() => null)
   if (!id || !/^[\w-]+$/.test(id)) return
   const out = await $.process
@@ -81,7 +88,47 @@ async function seedFromTranscript($: EngineInterface) {
   if (at) await update($, cacheAt, x => (numOr(x, 0) > 0 ? x : at))
   const text = needPrompt ? lastPromptOf(out) : null
   if (text) await update($, lastPrompt, x => x ?? { text, at: null })
+  const tokens = needCtx ? lastContextOf(out) : null
+  if (tokens) await update($, usage, x => (normalize(DEFAULT_USAGE, x).tokens === null ? { ...normalize(DEFAULT_USAGE, x), tokens } : x))
 }
+
+// ---------------------------------------------------------------- shared quota
+
+/**
+ * Quotas are account-wide, but a session reads them only from its own responses: an idle one shows what it
+ * last heard, and a restarted one (the desktop app stops a hidden session's process after a while idle)
+ * nothing until its first response. Every session of one config directory keeps the latest reading of each
+ * window in one file and takes the others' from it.
+ */
+const QUOTA_TICK_MS = 30_000
+let quotaTick: { cancel: () => void } | null = null
+
+async function quotaPath($: EngineInterface): Promise<string | null> {
+  // `$.env.get` takes literal names only: `claude plugin validate` lists what a mod reads.
+  const config = await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)
+  const home = await $.env.get('HOME').catch(() => undefined)
+  const dir = config || (home ? `${home}/.claude` : '')
+  return dir ? `${dir}/state/limits/quota.json` : null
+}
+
+const sameLimits = (a: readonly Limit[], b: readonly Limit[]) => JSON.stringify(a) === JSON.stringify(b)
+
+/** Ours into the file where newer than what it holds, the others' into ours. A failure leaves both as they were. */
+async function syncQuota($: EngineInterface) {
+  const path = await quotaPath($)
+  if (!path) return
+  const [text, own, now] = await Promise.all([$.fs.read(path).catch(() => ''), getUsage($), $.clock.now()])
+  const shared = parseQuota(text)
+  const merged = newestLimits(own.limits, shared, now)
+  if (!sameLimits(merged, freshLimits(shared, now))) await $.fs.write(path, JSON.stringify({ limits: merged }))
+  if (!sameLimits(merged, freshLimits(own.limits, now))) {
+    await update($, usage, x => {
+      const u = normalize(DEFAULT_USAGE, x)
+      return { ...u, limits: newestLimits(u.limits, merged, now) }
+    })
+  }
+}
+const syncSoon = ($: EngineInterface) => void syncQuota($).catch(() => undefined)
 
 /**
  * The window Claude Code compacts against: `autoCompactWindow` from settings, or the model's own limit.
@@ -156,10 +203,14 @@ export const register: Register = (on, options) => {
         tokens: u.context.tokens ?? null,
         window: u.context.window,
         costUsd: u.cost?.usd ?? null,
-        limits: mergeLimits(normalize(DEFAULT_USAGE, x).limits, limitsOf(u.rateLimits), at),
+        limits: mergeLimits(normalize(DEFAULT_USAGE, x).limits, limitsOf(u.rateLimits, at), at),
       }))
     }
     await Promise.all([seedFromTranscript($), readCompactWindow($)])
+    syncSoon($)
+    // A hot reload loads the module again and cancels its timers; session.start runs for the new one.
+    quotaTick?.cancel()
+    quotaTick = $.clock.every(QUOTA_TICK_MS, () => syncSoon($))
     void refreshSplit($, cfg).catch(() => undefined)
     return next(e)
   })
@@ -223,8 +274,9 @@ export const register: Register = (on, options) => {
       tokens: e.context.tokens ?? null,
       window: e.context.window,
       costUsd: e.cost?.usd ?? null,
-      limits: mergeLimits(normalize(DEFAULT_USAGE, x).limits, limitsOf(e.rateLimits), at),
+      limits: mergeLimits(normalize(DEFAULT_USAGE, x).limits, limitsOf(e.rateLimits, at), at),
     }))
+    if (e.rateLimits.length > 0) syncSoon($)
     // A model switch changes the window; the compaction window follows it.
     if (before.window !== e.context.window) await readCompactWindow($)
     return next(e)
@@ -312,7 +364,7 @@ export const register: Register = (on, options) => {
       ]
     }
 
-    for (const l of u.limits.filter(l => l.kind === 'five_hour' || l.kind === 'seven_day')) {
+    for (const l of freshLimits(u.limits, now).filter(l => l.kind === 'five_hour' || l.kind === 'seven_day')) {
       const label = limitLabel(l.kind)
       add(
         `quota-${l.kind}`,
@@ -325,7 +377,7 @@ export const register: Register = (on, options) => {
             <Text dimColor>{fmtLeft(l.resetsAt - now)}</Text>
           )}
         </Box>,
-        `${label} · ${Math.round(l.pct)}% used, ${Math.round(100 - l.pct)}% left${l.resetsAt ? ` · resets ${fmtAt(l.resetsAt, now)}` : ''}`,
+        `${label} · ${Math.round(l.pct)}% used, ${Math.round(100 - l.pct)}% left${l.resetsAt ? ` · resets ${fmtAt(l.resetsAt, now)}` : ''}${l.at ? ` · read ${fmtAt(l.at, now)}` : ''}`,
         `${gauge(label, l.pct)}${l.resetsAt ? ` ↻${fmtLeft(l.resetsAt - now)}` : ''}`,
       )
     }
