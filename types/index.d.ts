@@ -3,8 +3,8 @@ export type Usage = {
   tokens: number | null
   window: number
   costUsd: number | null
-  /** `resetsAt` in ms; null when the window reported none. */
-  limits: { kind: string; pct: number; resetsAt?: number | null }[]
+  /** `resetsAt` in ms; null when the window reported none. `at`: when the reading arrived, in ms. */
+  limits: { kind: string; pct: number; resetsAt?: number | null; at?: number }[]
   compactions: number
   /**
    * The window Claude Code compacts against (`autoCompactWindow` in settings, or the model's own limit),

@@ -114,11 +114,16 @@ export const fmtAt = (ms: number, now: number) => {
 type Limit = Usage['limits'][number]
 const LIMIT_ORDER = ['five_hour', 'seven_day']
 
-export const limitsOf = (rateLimits: readonly { kind: string; percentUsed: number; resetsAt?: string }[]): Limit[] =>
+/** `readAt`: when the response carrying the reading arrived, so readings of several sessions can be ordered. */
+export const limitsOf = (rateLimits: readonly { kind: string; percentUsed: number; resetsAt?: string }[], readAt?: number): Limit[] =>
   rateLimits.map(r => {
     const at = r.resetsAt ? Date.parse(r.resetsAt) : NaN
-    return { kind: r.kind, pct: r.percentUsed, resetsAt: Number.isFinite(at) ? at : null }
+    return { kind: r.kind, pct: r.percentUsed, resetsAt: Number.isFinite(at) ? at : null, ...(readAt !== undefined ? { at: readAt } : {}) }
   })
+
+const rank = (k: string) => (LIMIT_ORDER.includes(k) ? LIMIT_ORDER.indexOf(k) : LIMIT_ORDER.length)
+const byRank = (a: Limit, b: Limit) => rank(a.kind) - rank(b.kind)
+const live = (l: Limit, now: number) => l.resetsAt == null || l.resetsAt > now
 
 /**
  * A reading without a window keeps the last one until it resets: some responses carry no rate-limit
@@ -126,9 +131,42 @@ export const limitsOf = (rateLimits: readonly { kind: string; percentUsed: numbe
  */
 export const mergeLimits = (prev: readonly Limit[], next: readonly Limit[], now: number): Limit[] => {
   const seen = new Set(next.map(l => l.kind))
-  const kept = prev.filter(l => !seen.has(l.kind) && (l.resetsAt == null || l.resetsAt > now))
-  const rank = (k: string) => (LIMIT_ORDER.includes(k) ? LIMIT_ORDER.indexOf(k) : LIMIT_ORDER.length)
-  return [...next, ...kept].sort((a, b) => rank(a.kind) - rank(b.kind))
+  const kept = prev.filter(l => !seen.has(l.kind) && live(l, now))
+  return [...next, ...kept].sort(byRank)
+}
+
+/** Windows still open at `now`: past its reset a reading says nothing about the new window. */
+export const freshLimits = (limits: readonly Limit[], now: number): Limit[] => limits.filter(l => live(l, now))
+
+/**
+ * Quotas are account-wide, so the latest reading of any session is the right one: per window, the reading
+ * read last wins (one without `at` loses to any with it), and windows past their reset are dropped.
+ */
+export const newestLimits = (a: readonly Limit[], b: readonly Limit[], now: number): Limit[] => {
+  const best = new Map<string, Limit>()
+  for (const l of [...a, ...b]) {
+    if (!live(l, now)) continue
+    const prev = best.get(l.kind)
+    if (!prev || (l.at ?? 0) > (prev.at ?? 0)) best.set(l.kind, l)
+  }
+  return [...best.values()].sort(byRank)
+}
+
+/** The shared quota file's readings, read leniently: a malformed file or entry is no reading. */
+export const parseQuota = (text: string): Limit[] => {
+  let o: unknown
+  try {
+    o = JSON.parse(text)
+  } catch {
+    return []
+  }
+  const list = isObject(o) && Array.isArray(o.limits) ? o.limits : []
+  const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
+  return list.flatMap((l: unknown) =>
+    isObject(l) && typeof l.kind === 'string' && num(l.pct) && num(l.at)
+      ? [{ kind: l.kind, pct: l.pct as number, resetsAt: num(l.resetsAt) ? (l.resetsAt as number) : null, at: l.at as number }]
+      : [],
+  )
 }
 
 /** A rate-limit window's short name: `five_hour` → `5h`, `seven_day_opus` → `7d opus`. */
@@ -267,6 +305,35 @@ export const lastRequestAt = (tail: string): number | null => {
   const before = main.slice(0, first).filter(r => r.timestamp).pop()
   const at = Date.parse((before ?? main[first])?.timestamp ?? '')
   return Number.isFinite(at) ? at : null
+}
+
+/**
+ * The main loop's context at its last response, read from the transcript's tail like `lastRequestAt`: what a
+ * restarted process shows until its first response. null when no response is there or a compaction came after it.
+ */
+export const lastContextOf = (tail: string): number | null => {
+  const lines = tail.split('\n').slice(1)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let r: Row
+    try {
+      r = JSON.parse(lines[i] ?? '') as Row
+    } catch {
+      continue
+    }
+    if (r.isSidechain) continue
+    if (r.subtype === 'compact_boundary') return null
+    const u = r.type === 'assistant' ? (r.message?.usage as Record<string, unknown> | undefined) : undefined
+    if (u && typeof u.input_tokens === 'number') {
+      const n = (k: string) => (typeof u[k] === 'number' ? (u[k] as number) : 0)
+      return contextTokens({
+        input_tokens: n('input_tokens'),
+        output_tokens: n('output_tokens'),
+        cache_read_input_tokens: n('cache_read_input_tokens'),
+        cache_creation_input_tokens: n('cache_creation_input_tokens'),
+      })
+    }
+  }
+  return null
 }
 
 // ---------------------------------------------------------------- last prompt

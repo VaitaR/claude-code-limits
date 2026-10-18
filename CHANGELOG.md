@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0
+
+- Quotas are shared by every session of one config directory: an idle or restarted session shows the latest 5h/7d reading any session received, and the hover says when it was read.
+- A quota whose window reset since its reading is no longer drawn with the old figure.
+- A restarted session (the desktop app stops a hidden idle session's process) shows the context of its last response from the transcript instead of an empty band.
+
 ## 0.8.0
 
 - The running-agents hover shows each subagent's task, how long it has run, its model, its last request's context, its tool calls so far and the latest one, like the desktop app's agent cards.
