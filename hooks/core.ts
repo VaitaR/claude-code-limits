@@ -100,6 +100,9 @@ export const fmtLeft = (ms: number) => {
 export const fmtCacheLeft = (ms: number) =>
   ms <= 0 ? 'cold' : ms < 60_000 ? `${Math.min(59, Math.ceil(ms / 1000))}s` : `${Math.floor(ms / 60_000)}m`
 
+/** How long ago: `just now`, `5m ago`, `1h05m ago`, `2d03h ago`. */
+export const fmtAgo = (ms: number) => (ms < 60_000 ? 'just now' : `${fmtLeft(ms)} ago`)
+
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 /** A moment as local wall time: `18:40` within a day of `now`, `Thu 14:00` further out. */
