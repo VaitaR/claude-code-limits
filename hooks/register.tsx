@@ -11,6 +11,7 @@ import {
   agentLines,
   contextOf,
   contextTokens,
+  fmtAgo,
   fmtAt,
   fmtCacheLeft,
   fmtLeft,
@@ -46,7 +47,7 @@ const running = atom({ plugin: 'limits', key: 'running' } as const, [])
 const costAtStart = atom({ plugin: 'limits', key: 'costAtStart' } as const, null)
 const lastTurnUsd = atom({ plugin: 'limits', key: 'lastTurnUsd' } as const, null)
 const split = atom({ plugin: 'limits', key: 'split' } as const, null)
-const lastPrompt = atom({ plugin: 'limits', key: 'lastPrompt' } as const, null)
+const prompts = atom({ plugin: 'limits', key: 'prompts' } as const, [])
 
 // Every read goes through these, so a value saved under an older shape still reads.
 async function getUsage($: EngineInterface): Promise<Usage> {
@@ -59,10 +60,15 @@ async function getRunning($: EngineInterface): Promise<Running[]> {
 async function touch($: EngineInterface, id: string, f: (a: Running) => Running) {
   await update($, running, list => listOf<Running>(list).map(a => (a.id === id ? f(a) : a)))
 }
-async function getLastPrompt($: EngineInterface): Promise<LastPrompt | null> {
-  const p = (await read($, lastPrompt)) as Partial<LastPrompt> | null
-  return p && typeof p.text === 'string' && p.text ? { text: p.text, at: typeof p.at === 'number' ? p.at : null } : null
+const promptsOf = (v: unknown): LastPrompt[] =>
+  listOf<Partial<LastPrompt>>(v).flatMap(p =>
+    p && typeof p.text === 'string' && p.text ? [{ text: p.text, at: typeof p.at === 'number' ? p.at : null }] : [],
+  )
+async function getPrompts($: EngineInterface): Promise<LastPrompt[]> {
+  return promptsOf(await read($, prompts))
 }
+const PROMPTS_KEPT = 10
+const PROMPT_HOVER_CHARS = 70
 const PROMPT_MIN = 40
 const PROMPT_FLOOR = 12
 const numOr = <T,>(v: unknown, d: T): number | T => (typeof v === 'number' && Number.isFinite(v) ? v : d)
@@ -75,7 +81,7 @@ const numOr = <T,>(v: unknown, d: T): number | T => (typeof v === 'number' && Nu
  */
 async function seedFromTranscript($: EngineInterface) {
   const needCache = numOr(await read($, cacheAt), 0) <= 0
-  const needPrompt = (await getLastPrompt($)) === null
+  const needPrompt = (await getPrompts($)).length === 0
   const needCtx = (await getUsage($)).tokens === null
   if (!needCache && !needPrompt && !needCtx) return
   const id = await $.session.id().catch(() => null)
@@ -87,7 +93,7 @@ async function seedFromTranscript($: EngineInterface) {
   const at = needCache ? lastRequestAt(out) : null
   if (at) await update($, cacheAt, x => (numOr(x, 0) > 0 ? x : at))
   const text = needPrompt ? lastPromptOf(out) : null
-  if (text) await update($, lastPrompt, x => x ?? { text, at: null })
+  if (text) await update($, prompts, x => (promptsOf(x).length > 0 ? x : [{ text, at: null }]))
   const tokens = needCtx ? lastContextOf(out) : null
   if (tokens) await update($, usage, x => (normalize(DEFAULT_USAGE, x).tokens === null ? { ...normalize(DEFAULT_USAGE, x), tokens } : x))
 }
@@ -181,7 +187,7 @@ async function resetAll($: EngineInterface) {
   await update($, costAtStart, () => null)
   await update($, lastTurnUsd, () => null)
   await update($, split, () => null)
-  await update($, lastPrompt, () => null)
+  await update($, prompts, () => [])
   // The context gauge waits for the next measurement rather than showing the pre-clear fill.
   await update($, usage, x => ({ ...normalize(DEFAULT_USAGE, x), pct: null, tokens: null, compactions: 0 }))
 }
@@ -231,7 +237,7 @@ export const register: Register = (on, options) => {
     if (own && text && !('drop' in done)) {
       await $.clock
         .now()
-        .then(at => update($, lastPrompt, () => ({ text, at })))
+        .then(at => update($, prompts, x => [...promptsOf(x), { text, at }].slice(-PROMPTS_KEPT)))
         .catch(() => undefined)
     }
     return done
@@ -335,15 +341,16 @@ export const register: Register = (on, options) => {
     const els = $.ui.resolve(e)
     const { Box, Text } = els
     const hasClient = 'Client' in els
-    const [u, agents, cache, now, lastTurn, sp, lp] = await Promise.all([
+    const [u, agents, cache, now, lastTurn, sp, ps] = await Promise.all([
       getUsage($),
       getRunning($),
       read($, cacheAt),
       $.clock.now(),
       read($, lastTurnUsd),
       read($, split),
-      getLastPrompt($),
+      getPrompts($),
     ])
+    const lp = ps[ps.length - 1] ?? null
     const cx = contextOf(u)
     const sentAt = numOr(cache, 0)
     const last = numOr(lastTurn, null)
@@ -450,7 +457,7 @@ export const register: Register = (on, options) => {
     const hoverWidth = (rows: string[]) => Math.min(Math.max(...rows.map(l => l.length)) + 2, width)
     const card = (key: string, rows: string[]) =>
       rows.map((l, j) => (
-        <Text key={`${key}-${j}`} color={j === 0 ? C.text : C.dim} wrap={key === 'prompt' && j > 0 ? 'wrap' : 'truncate'}>
+        <Text key={`${key}-${j}`} color={j === 0 ? C.text : C.dim} wrap="truncate">
           {l}
         </Text>
       ))
@@ -498,7 +505,11 @@ export const register: Register = (on, options) => {
             </Text>
           </Box>
         ),
-        detail: [lp.at !== null ? `last prompt · sent ${fmtAt(lp.at, now)}` : 'last prompt', shorten(lp.text, 400)],
+        // Newest first; elapsed time, not wall time, so no clock arithmetic is needed to read it.
+        detail: [
+          ps.length === 1 ? 'last prompt' : `last ${ps.length} prompts`,
+          ...[...ps].reverse().map(p => `${p.at !== null ? fmtAgo(now - p.at) : 'earlier'} · ${shorten(p.text, PROMPT_HOVER_CHARS)}`),
+        ],
         cells,
       })
       placed.push({ row, col })

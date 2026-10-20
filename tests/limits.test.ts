@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { activityOf, agentLines, fmtAt, fmtCacheLeft, fmtElapsed, fmtLeft, gaugeCells, modelLabel, freshLimits, lastContextOf, lastPromptOf, lastRequestAt, mergeLimits, newestLimits, parseQuota, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
+import { activityOf, agentLines, fmtAgo, fmtAt, fmtCacheLeft, fmtElapsed, fmtLeft, gaugeCells, modelLabel, freshLimits, lastContextOf, lastPromptOf, lastRequestAt, mergeLimits, newestLimits, parseQuota, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
 
 // The type lib is es2023 alone; the test runtime has timers.
 declare function setTimeout(fn: (value?: unknown) => void, ms: number): unknown
@@ -30,6 +30,10 @@ test('a moment reads as wall time today, with the weekday further out', () => {
   const now = new Date(2026, 9, 10, 12, 0).getTime()
   expect(fmtAt(new Date(2026, 9, 10, 18, 40).getTime(), now)).toBe('18:40')
   expect(fmtAt(new Date(2026, 9, 15, 14, 5).getTime(), now)).toBe('Thu 14:05')
+})
+
+test('an age reads as time elapsed', () => {
+  expect([fmtAgo(59_000), fmtAgo(5 * 60_000), fmtAgo(65 * 60_000), fmtAgo((51 * 60 + 2) * 60_000)]).toEqual(['just now', '5m ago', '1h05m ago', '2d03h ago'])
 })
 
 test('a reading without a window keeps the last one until it resets', () => {
@@ -461,7 +465,7 @@ test('the band shows the person\'s last prompt, not a notification or another pl
     for (const cols of [40, 120]) {
       const ui = await $.ui.mount({ ...band(cols), surface })
       expect([surface, cols, await ui.find({ text: /^❯ fix the flaky test in core\.ts$/ })]).toEqual([surface, cols, expect.anything()])
-      for (const text of [/^last prompt · sent \d\d:\d\d$/, /^fix the flaky test in core\.ts$/]) expect([surface, cols, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, cols, String(text), expect.anything()])
+      for (const text of [/^last prompt$/, /^just now · fix the flaky test in core\.ts$/]) expect([surface, cols, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, cols, String(text), expect.anything()])
       for (const text of [/notification/, /from a plugin/]) expect([surface, String(text), await ui.find({ text })]).toEqual([surface, String(text), undefined])
       await ui.unmount()
     }
@@ -469,6 +473,8 @@ test('the band shows the person\'s last prompt, not a notification or another pl
   await $.prompt.submit(submit('typed on the phone', { kind: 'bridge' }))
   const phone = await $.ui.mount({ ...band(120), surface: 'desktop' })
   expect(await phone.find({ text: /^❯ typed on the phone$/ })).toBeDefined()
+  // Every prompt is listed newest first, its age as elapsed time.
+  for (const text of [/^last 2 prompts$/, /^just now · typed on the phone$/, /^just now · fix the flaky test in core\.ts$/]) expect([String(text), await phone.find({ text })]).toEqual([String(text), expect.anything()])
   await phone.unmount()
   await $.session.end({ reason: 'clear', sessionId: 'S-1' } as never)
   const cleared = await $.ui.mount({ ...band(120), surface: 'desktop' })
@@ -486,7 +492,7 @@ test('a mod loaded mid-session shows the last prompt the transcript recorded', a
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...band(120), surface })
     expect([surface, await ui.find({ text: /^❯ map the repo$/ })]).toEqual([surface, expect.anything()])
-    expect([surface, await ui.find({ text: hoverRow(surface, /^last prompt$/) })]).toEqual([surface, expect.anything()])
+    expect([surface, await ui.find({ text: hoverRow(surface, /^earlier · map the repo$/) })]).toEqual([surface, expect.anything()])
     await ui.unmount()
   }
 })
@@ -508,8 +514,8 @@ test('a terminal hover sits in a kept row under its segment, or with none to spa
   engine(on)
   on('prompt.submit', (_$, e) => ({ text: e.text }))
   await $.prompt.submit(submit('ping', { kind: 'composer' }))
-  // `cache ○ cold` at column 0, `❯ ping` at 14; the prompt's hover (31 cells) is shifted left to fit 40.
-  const prompt = 'last prompt · sent 00:00 · ping'.length
+  // `cache ○ cold` at column 0, `❯ ping` at 14; the prompt's hover (29 cells) is shifted left to fit 40.
+  const prompt = 'last prompt · just now · ping'.length
   for (const [maxRows, row, cache, ping] of [
     // The cache's 41 cells are capped at the band's 40.
     [10, true, [0, 0, 40], [0, 40 - prompt, prompt]],

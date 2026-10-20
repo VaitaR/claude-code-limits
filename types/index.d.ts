@@ -62,7 +62,8 @@ declare module 'claude-code' {
       /** What the last main turn cost; null before one ends or without a cost. */
       lastTurnUsd: number | null
       split: CostSplit | null
-      lastPrompt: LastPrompt | null
+      /** The person's prompts since load or /clear, oldest first, the last PROMPTS_KEPT. */
+      prompts: LastPrompt[]
     }
   }
 }
