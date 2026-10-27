@@ -10,6 +10,12 @@ declare function setTimeout(fn: (value?: unknown) => void, ms: number): unknown
 const hoverRow = (surface: string, re: RegExp) =>
   surface === 'terminal' ? new RegExp(`(?:^| · )${re.source.replace(/^\^|\$$/g, '')}(?: · |$)`) : re
 
+/** A main-thread step that got a response: only after one does a measurement carry a new reading. */
+const answering = (on: On) =>
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: { model: 'claude-opus-5-5', input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } as never
+  })
+
 // ---------------------------------------------------------------- pure behaviour
 
 test('config is read leniently: bad values fall back to defaults', () => {
@@ -204,7 +210,7 @@ test('the band shows quotas, context and cache, running agents at the right, and
     for (const cols of [40, 120]) {
       const ui = await $.ui.mount({ ...band(cols), surface })
       for (const text of [/^5h $/, /^ 34%$/, /^ ↻$/, /^7d $/, /^ 92%$/, /^ctx $/, /^ 60%$/, /^━━━━$/, /^━━$/, /^cache $/, /^○ cold$/, /^◐ Explore$/,
-        /^5h · 34% used, 66% left · resets \d\d:\d\d · read \d\d:\d\d$/, /^7d · 92% used, 8% left · read \d\d:\d\d$/, /^ctx · 120k of 200k tokens$/, /^cache · cold: the next prompt rewrites it$/,
+        /^5h · 34% used, 66% left · resets \d\d:\d\d$/, /^7d · 92% used, 8% left$/, /^ctx · 120k of 200k tokens$/, /^cache · cold: the next prompt rewrites it$/,
         /^\$1\.00$/, /^session \$1\.00 at API prices, subagents included$/]) {
         expect([surface, cols, String(text), await ui.find({ text: hoverRow(surface, text) })]).toEqual([surface, cols, String(text), expect.anything()])
       }
@@ -258,6 +264,8 @@ test('a measurement without rate limits leaves the band quotas in place', async 
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   const H = 3_600_000
   const ctx = { tokens: 120_000, window: 200_000, percent: 60 }
+  answering(on)
+  for await (const _ of $.turn.step({ turnId: 'R', index: 0, model: 'claude-opus-5-5', effort: 'medium', messageCount: 1 })) void _
   await $.session.measure({ context: ctx, rateLimits: [{ kind: 'five_hour', percentUsed: 6, resetsAt: new Date(clock.now() + 4 * H).toISOString() }, { kind: 'seven_day', percentUsed: 46 }], changed: ['context', 'rateLimits'] })
   await $.session.measure({ context: ctx, rateLimits: [], changed: ['rateLimits'] })
   for (const surface of ['terminal', 'desktop'] as const) {
@@ -593,6 +601,8 @@ test('a session\'s own reading goes to the shared file, unless the file holds a 
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   const ctx = { tokens: 1_000, window: 200_000, percent: 1 }
   const resetsAt = new Date(clock.now() + H).toISOString()
+  answering(on)
+  for await (const _ of $.turn.step({ turnId: 'R', index: 0, model: 'claude-opus-5-5', effort: 'medium', messageCount: 1 })) void _
   await $.session.measure({ context: ctx, rateLimits: [{ kind: 'five_hour', percentUsed: 20, resetsAt }], changed: ['rateLimits'] })
   await new Promise(r => setTimeout(r, 0))
   expect(parseQuota(file.text ?? '')).toEqual([{ kind: 'five_hour', pct: 20, resetsAt: Date.parse(resetsAt), at: clock.now() }])
@@ -610,7 +620,7 @@ const settle = async () => {
 }
 
 test('the server\'s quota answer is read leniently, a window the plan lacks dropped', () => {
-  const reply = { seven_day: { utilization: 81, resets_at: '2026-10-30T07:00:00Z' }, five_hour: { utilization: 8, resets_at: '2026-10-28T02:30:00Z' }, seven_day_opus: null, extra_usage: { is_enabled: false } }
+  const reply = { seven_day: { utilization: 81, resets_at: '2026-10-30T07:00:00Z' }, five_hour: { utilization: 8, resets_at: '2026-10-28T02:30:00Z' }, seven_day_opus: null, extra_usage: { is_enabled: true, utilization: 31.64 } }
   expect(usageReplyLimits(JSON.stringify(reply), 5)).toEqual([
     { kind: 'five_hour', pct: 8, resetsAt: Date.parse('2026-10-28T02:30:00Z'), at: 5 },
     { kind: 'seven_day', pct: 81, resetsAt: Date.parse('2026-10-30T07:00:00Z'), at: 5 },
@@ -657,6 +667,57 @@ test('with quotaPoll, one session per period asks the server and the band shows 
   expect(fetched.length).toBe(2)
 })
 
+test('a restarted process\'s old reading never overwrites a fresher one, though the engine hands it again', async ($, on) => {
+  const clock = mock.clock(on)
+  await clock.advance(60_000)
+  const H = 3_600_000
+  const resetsAt = clock.now() + 50 * H
+  const file = quotaFile(on, JSON.stringify({ limits: [{ kind: 'seven_day', pct: 81, resetsAt, at: clock.now() - 1_000 }] }))
+  const r63 = { kind: 'seven_day', percentUsed: 63, resetsAt: new Date(resetsAt).toISOString() }
+  const old = [r63]
+  on('ui.status', () => ({ value: undefined }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: old } }))
+  on('session.id', () => ({ value: 'abc-123' }))
+  on('process.run', () => ({ value: { exitCode: 0, stderr: '', stdout: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  answering(on)
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  await settle()
+  const ctx = { tokens: 1_000, window: 200_000, percent: 1 }
+  // The first measurement names every unit, the old reading included.
+  await $.session.measure({ context: ctx, rateLimits: old, changed: ['context', 'rateLimits'] })
+  await settle()
+  expect(parseQuota(file.text ?? '').map(l => l.pct)).toEqual([81])
+  const ui = await $.ui.mount({ ...band(120), surface: 'desktop' })
+  expect(await ui.find({ text: /^ 81%$/ })).toBeDefined()
+  await ui.unmount()
+  // A reading that moved came with a response: it is new and goes to the file.
+  for await (const _ of $.turn.step({ turnId: 'R', index: 0, model: 'claude-opus-5-5', effort: 'medium', messageCount: 1 })) void _
+  await $.session.measure({ context: ctx, rateLimits: [{ ...r63, percentUsed: 82 }], changed: ['rateLimits'] })
+  await settle()
+  expect(parseQuota(file.text ?? '')).toEqual([{ kind: 'seven_day', pct: 82, resetsAt, at: clock.now() }])
+})
+
+test('an old reading the first measurement brings, with no response yet, is not taken for new', async ($, on) => {
+  const clock = mock.clock(on)
+  await clock.advance(60_000)
+  const resetsAt = clock.now() + 50 * 3_600_000
+  const file = quotaFile(on, JSON.stringify({ limits: [{ kind: 'seven_day', pct: 81, resetsAt, at: clock.now() - 1_000 }] }))
+  on('ui.status', () => ({ value: undefined }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  on('session.id', () => ({ value: 'abc-123' }))
+  on('process.run', () => ({ value: { exitCode: 0, stderr: '', stdout: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  await settle()
+  const old = [{ kind: 'seven_day', percentUsed: 10, resetsAt: new Date(resetsAt).toISOString() }]
+  await $.session.measure({ context: { tokens: 1_000, window: 200_000, percent: 1 }, rateLimits: old, changed: ['context', 'rateLimits'] })
+  await settle()
+  expect(parseQuota(file.text ?? '').map(l => l.pct)).toEqual([81])
+})
+
 test('without quotaPoll the mod never asks the server', async ($, on) => {
   mock.clock(on)
   quotaFile(on)
@@ -698,6 +759,8 @@ test('a quota whose window reset while the session sat idle stays drawn, as rese
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   const ctx = { tokens: 1_000, window: 200_000, percent: 1 }
   const resetsAt = new Date(clock.now() + 60_000).toISOString()
+  answering(on)
+  for await (const _ of $.turn.step({ turnId: 'R', index: 0, model: 'claude-opus-5-5', effort: 'medium', messageCount: 1 })) void _
   await $.session.measure({ context: ctx, rateLimits: [{ kind: 'five_hour', percentUsed: 88, resetsAt }, { kind: 'seven_day', percentUsed: 12 }], changed: ['rateLimits'] })
   await clock.advance(2 * 60_000)
   const ui = await $.ui.mount({ ...band(120), surface: 'desktop' })
