@@ -36,6 +36,7 @@ import {
   polledAtOf,
   promptLine,
   quotaLevel,
+  quotaLogLine,
   shorten,
   splitLines,
   usageReplyLimits,
@@ -137,7 +138,9 @@ async function syncQuota($: EngineInterface, read: readonly Limit[] = []) {
   const [text, own] = await Promise.all([$.fs.read(path).catch(() => ''), getUsage($)])
   const shared = parseQuota(text)
   const merged = newestLimits(newestLimits(own.limits, read), shared)
-  if (!sameLimits(merged, shared)) await writeQuota($, path, merged, polledAtOf(text))
+  // `parseQuota` drops what is no plan window: written back, it would never compare equal and rewrite every tick.
+  const kept = merged.filter(l => parseQuota(JSON.stringify({ limits: [l] })).length > 0)
+  if (!sameLimits(kept, shared)) await writeQuota($, path, kept, polledAtOf(text))
   if (!sameLimits(merged, own.limits)) {
     await update($, usage, x => {
       const u = normalize(DEFAULT_USAGE, x)
@@ -169,8 +172,23 @@ async function pollQuota($: EngineInterface, cfg: Config) {
   if (auth?.kind !== 'bearer') return
   const r = await $.http.fetch(USAGE_URL, { auth: auth.handle, headers: { 'anthropic-beta': 'oauth-2025-04-20' } })
   if (!r.ok) return
-  const read = usageReplyLimits(r.text, await $.clock.now())
-  if (read.length > 0) await syncQuota($, read)
+  const at = await $.clock.now()
+  const read = usageReplyLimits(r.text, at)
+  if (read.length === 0) return
+  await syncQuota($, read)
+  if (cfg.quotaLog) await appendQuotaLog($, cfg.quotaLog, quotaLogLine(read, at))
+}
+
+/** `$.fs` writes whole files only, so the log is read and written back; at one line per poll it stays small. */
+async function appendQuotaLog($: EngineInterface, path: string, line: string) {
+  let file = path
+  if (path.startsWith('~/')) {
+    const home = await $.env.get('HOME').catch(() => undefined)
+    if (!home) return
+    file = `${home}${path.slice(1)}`
+  }
+  const text = await $.fs.read(file).catch(() => '')
+  await $.fs.write(file, `${text}${text && !text.endsWith('\n') ? '\n' : ''}${line}\n`)
 }
 const pollSoon = ($: EngineInterface, cfg: Config) => void pollQuota($, cfg).catch(() => undefined)
 

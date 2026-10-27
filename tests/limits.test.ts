@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { activityOf, agentLines, fmtAgo, fmtAt, fmtCacheLeft, fmtElapsed, fmtLeft, gaugeCells, modelLabel, hasReset, lastContextOf, lastPromptOf, lastRequestAt, mergeLimits, newestLimits, parseQuota, parseConfig, polledAtOf, usageReplyLimits, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
+import { activityOf, agentLines, fmtAgo, fmtAt, fmtCacheLeft, fmtElapsed, fmtLeft, gaugeCells, modelLabel, hasReset, lastContextOf, lastPromptOf, lastRequestAt, mergeLimits, newestLimits, parseQuota, parseConfig, polledAtOf, quotaLogLine, usageReplyLimits, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
 
 // The type lib is es2023 alone; the test runtime has timers.
 declare function setTimeout(fn: (value?: unknown) => void, ms: number): unknown
@@ -19,12 +19,13 @@ const answering = (on: On) =>
 // ---------------------------------------------------------------- pure behaviour
 
 test('config is read leniently: bad values fall back to defaults', () => {
-  expect(parseConfig({})).toEqual({ palette: 'theme', costCommand: [], cacheTtlMs: 3_600_000, quotaPollMs: 0 })
-  expect(parseConfig({ palette: 'pastel', costCommand: '  python3   /x/cost.py ', cacheTtl: '5m', quotaPoll: '15m' })).toEqual({
+  expect(parseConfig({})).toEqual({ palette: 'theme', costCommand: [], cacheTtlMs: 3_600_000, quotaPollMs: 0, quotaLog: '' })
+  expect(parseConfig({ palette: 'pastel', costCommand: '  python3   /x/cost.py ', cacheTtl: '5m', quotaPoll: '15m', quotaLog: ' ~/q.jsonl ' })).toEqual({
     palette: 'pastel',
     costCommand: ['python3', '/x/cost.py'],
     cacheTtlMs: 300_000,
     quotaPollMs: 900_000,
+    quotaLog: '~/q.jsonl',
   })
   expect(parseConfig({ palette: 7, costCommand: null, cacheTtl: 'forever', quotaPoll: '1s' })).toEqual(parseConfig({}))
 })
@@ -65,6 +66,7 @@ test('the shared quota file is read leniently', () => {
   const ok = { kind: 'five_hour', pct: 6, resetsAt: 5_000, at: 100 }
   expect(parseQuota(JSON.stringify({ limits: [ok, { kind: 'seven_day', pct: 'x', at: 1 }, { kind: 'x', pct: 1 }] }))).toEqual([ok])
   expect(parseQuota(JSON.stringify({ limits: [{ ...ok, resetsAt: undefined }] }))).toEqual([{ ...ok, resetsAt: null }])
+  expect(parseQuota(JSON.stringify({ limits: [{ kind: 'extra_usage', pct: 31, at: 1 }] }))).toEqual([])
   expect(parseQuota('not json')).toEqual([])
   expect(parseQuota('[]')).toEqual([])
 })
@@ -716,6 +718,46 @@ test('an old reading the first measurement brings, with no response yet, is not 
   await $.session.measure({ context: { tokens: 1_000, window: 200_000, percent: 1 }, rateLimits: old, changed: ['context', 'rateLimits'] })
   await settle()
   expect(parseQuota(file.text ?? '').map(l => l.pct)).toEqual([81])
+})
+
+test('a quota log line keys each window\'s reading by its name', () => {
+  expect(JSON.parse(quotaLogLine([{ kind: 'five_hour', pct: 10, resetsAt: 5, at: 9 }, { kind: 'seven_day', pct: 82, resetsAt: null, at: 9 }], 9))).toEqual({
+    at: 9,
+    source: 'poll',
+    five_hour: { pct: 10, resetsAt: 5 },
+    seven_day: { pct: 82, resetsAt: null },
+  })
+})
+
+test('with quotaLog, each poll\'s answer is appended to the log as one line', { options: { quotaPoll: '5m', quotaLog: '~/q.jsonl' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  await clock.advance(60_000)
+  const quota: { text?: string } = {}
+  on('env.get', (_$, e) => ({ value: e.name === 'HOME' ? '/h' : undefined }))
+  let log: string | undefined = '{"at":1}\n'
+  on('fs.read', (_$, e) => {
+    if (e.path === '/h/q.jsonl' && log !== undefined) return { value: log }
+    if (e.path !== '/h/.claude/state/limits/quota.json' || quota.text === undefined) throw new Error('ENOENT')
+    return { value: quota.text }
+  })
+  on('fs.write', (_$, e) => {
+    if (e.path === '/h/q.jsonl') log = e.text
+    else if (e.path === '/h/.claude/state/limits/quota.json') quota.text = e.text
+    return { value: undefined }
+  })
+  on('ui.status', () => ({ value: undefined }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  on('session.id', () => ({ value: 'abc-123' }))
+  on('process.run', () => ({ value: { exitCode: 0, stderr: '', stdout: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }))
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ five_hour: { utilization: 44, resets_at: null } }) } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  await settle()
+  await clock.advance(5 * 60_000)
+  await settle()
+  const lines = (log ?? '').trimEnd().split('\n').map(l => JSON.parse(l))
+  expect(lines).toEqual([{ at: 1 }, { at: 60_000, source: 'poll', five_hour: { pct: 44, resetsAt: null } }, { at: 360_000, source: 'poll', five_hour: { pct: 44, resetsAt: null } }])
 })
 
 test('without quotaPoll the mod never asks the server', async ($, on) => {

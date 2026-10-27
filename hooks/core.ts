@@ -39,6 +39,8 @@ export type Config = {
   cacheTtlMs: number
   /** How often one session of the config directory asks the server for the quota; 0: never. */
   quotaPollMs: number
+  /** A file each poll's answer is appended to as one JSON line; `~/` is the home directory. Empty: no log. */
+  quotaLog: string
 }
 
 /** The plugin's `/config` values, read leniently: anything malformed falls back to the default. */
@@ -49,6 +51,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     costCommand: str('costCommand', '').trim().split(/\s+/).filter(Boolean),
     cacheTtlMs: str('cacheTtl', '1h') === '5m' ? 300_000 : 3_600_000,
     quotaPollMs: ({ '5m': 300_000, '15m': 900_000 } as Record<string, number>)[str('quotaPoll', 'off')] ?? 0,
+    quotaLog: str('quotaLog', '').trim(),
   }
 }
 
@@ -176,7 +179,7 @@ export const parseQuota = (text: string): Limit[] => {
   const list = isObject(o) && Array.isArray(o.limits) ? o.limits : []
   const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
   return list.flatMap((l: unknown) =>
-    isObject(l) && typeof l.kind === 'string' && num(l.pct) && num(l.at)
+    isObject(l) && typeof l.kind === 'string' && isPlanWindow(l.kind) && num(l.pct) && num(l.at)
       ? [{ kind: l.kind, pct: l.pct as number, resetsAt: num(l.resetsAt) ? (l.resetsAt as number) : null, at: l.at as number }]
       : [],
   )
@@ -197,6 +200,9 @@ export const polledAtOf = (text: string): number => {
  * `{ utilization: 0-100, resets_at: ISO }`, null for a window the plan lacks. Undocumented, so read
  * leniently: anything else is no reading.
  */
+/** A window of the plan's quota; `extra_usage` and the like share a reading's shape but are none. */
+const isPlanWindow = (kind: string) => /^(five_hour|seven_day)/.test(kind)
+
 export const usageReplyLimits = (text: string, readAt: number): Limit[] => {
   let o: unknown
   try {
@@ -207,13 +213,16 @@ export const usageReplyLimits = (text: string, readAt: number): Limit[] => {
   if (!isObject(o)) return []
   return Object.entries(o)
     .flatMap(([kind, w]) => {
-      // `extra_usage` and the like share the shape but are no window of the plan.
-      if (!/^(five_hour|seven_day)/.test(kind) || !isObject(w) || typeof w.utilization !== 'number' || !Number.isFinite(w.utilization)) return []
+      if (!isPlanWindow(kind) || !isObject(w) || typeof w.utilization !== 'number' || !Number.isFinite(w.utilization)) return []
       const at = typeof w.resets_at === 'string' ? Date.parse(w.resets_at) : NaN
       return [{ kind, pct: w.utilization, resetsAt: Number.isFinite(at) ? at : null, at: readAt }]
     })
     .sort(byRank)
 }
+
+/** One `quotaLog` line: a poll's readings keyed by window, `at` when the answer came. */
+export const quotaLogLine = (read: readonly Limit[], at: number): string =>
+  JSON.stringify({ at, source: 'poll', ...Object.fromEntries(read.map(l => [l.kind, { pct: l.pct, resetsAt: l.resetsAt }])) })
 
 /** A rate-limit window's short name: `five_hour` → `5h`, `seven_day_opus` → `7d opus`. */
 export const limitLabel = (kind: string) =>
