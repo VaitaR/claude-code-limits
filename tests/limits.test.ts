@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { activityOf, agentLines, fmtAgo, fmtAt, fmtCacheLeft, fmtElapsed, fmtLeft, gaugeCells, modelLabel, hasReset, lastContextOf, lastPromptOf, lastRequestAt, mergeLimits, newestLimits, parseQuota, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
+import { activityOf, agentLines, fmtAgo, fmtAt, fmtCacheLeft, fmtElapsed, fmtLeft, gaugeCells, modelLabel, hasReset, lastContextOf, lastPromptOf, lastRequestAt, mergeLimits, newestLimits, parseQuota, parseConfig, polledAtOf, usageReplyLimits, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
 
 // The type lib is es2023 alone; the test runtime has timers.
 declare function setTimeout(fn: (value?: unknown) => void, ms: number): unknown
@@ -13,13 +13,14 @@ const hoverRow = (surface: string, re: RegExp) =>
 // ---------------------------------------------------------------- pure behaviour
 
 test('config is read leniently: bad values fall back to defaults', () => {
-  expect(parseConfig({})).toEqual({ palette: 'theme', costCommand: [], cacheTtlMs: 3_600_000 })
-  expect(parseConfig({ palette: 'pastel', costCommand: '  python3   /x/cost.py ', cacheTtl: '5m' })).toEqual({
+  expect(parseConfig({})).toEqual({ palette: 'theme', costCommand: [], cacheTtlMs: 3_600_000, quotaPollMs: 0 })
+  expect(parseConfig({ palette: 'pastel', costCommand: '  python3   /x/cost.py ', cacheTtl: '5m', quotaPoll: '15m' })).toEqual({
     palette: 'pastel',
     costCommand: ['python3', '/x/cost.py'],
     cacheTtlMs: 300_000,
+    quotaPollMs: 900_000,
   })
-  expect(parseConfig({ palette: 7, costCommand: null, cacheTtl: 'forever' })).toEqual(parseConfig({}))
+  expect(parseConfig({ palette: 7, costCommand: null, cacheTtl: 'forever', quotaPoll: '1s' })).toEqual(parseConfig({}))
 })
 
 test('a quota colours by what is used', () => {
@@ -601,6 +602,75 @@ test('a session\'s own reading goes to the shared file, unless the file holds a 
   await $.session.measure({ context: ctx, rateLimits: [], changed: ['context'] })
   await new Promise(r => setTimeout(r, 0))
   expect(file.writes).toBe(writes)
+})
+
+/** The poll is a chain of reads, a claim, a request and a sync: a few turns of the loop. */
+const settle = async () => {
+  for (let i = 0; i < 10; i++) await new Promise(r => setTimeout(r, 0))
+}
+
+test('the server\'s quota answer is read leniently, a window the plan lacks dropped', () => {
+  const reply = { seven_day: { utilization: 81, resets_at: '2026-10-30T07:00:00Z' }, five_hour: { utilization: 8, resets_at: '2026-10-28T02:30:00Z' }, seven_day_opus: null, extra_usage: { is_enabled: false } }
+  expect(usageReplyLimits(JSON.stringify(reply), 5)).toEqual([
+    { kind: 'five_hour', pct: 8, resetsAt: Date.parse('2026-10-28T02:30:00Z'), at: 5 },
+    { kind: 'seven_day', pct: 81, resetsAt: Date.parse('2026-10-30T07:00:00Z'), at: 5 },
+  ])
+  expect(usageReplyLimits(JSON.stringify({ five_hour: { utilization: 3, resets_at: null } }), 5)).toEqual([{ kind: 'five_hour', pct: 3, resetsAt: null, at: 5 }])
+  expect(usageReplyLimits('<html>', 5)).toEqual([])
+  expect(usageReplyLimits('[]', 5)).toEqual([])
+  expect(polledAtOf(JSON.stringify({ limits: [], polledAt: 7 }))).toBe(7)
+  expect(polledAtOf(JSON.stringify({ limits: [] }))).toBe(0)
+  expect(polledAtOf('x')).toBe(0)
+})
+
+test('with quotaPoll, one session per period asks the server and the band shows its answer', { options: { quotaPoll: '5m' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  await clock.advance(60_000)
+  const H = 3_600_000
+  const file = quotaFile(on)
+  const fetched: string[] = []
+  on('ui.status', () => ({ value: undefined }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  on('session.id', () => ({ value: 'abc-123' }))
+  on('process.run', () => ({ value: { exitCode: 0, stderr: '', stdout: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }))
+  const resetsAt = new Date(clock.now() + H).toISOString()
+  on('http.fetch', (_$, e) => {
+    fetched.push(e.url)
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ five_hour: { utilization: 44, resets_at: resetsAt }, seven_day: null }) } }
+  })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  await settle()
+  expect(fetched).toEqual(['https://api.anthropic.com/api/oauth/usage'])
+  expect(parseQuota(file.text ?? '')).toEqual([{ kind: 'five_hour', pct: 44, resetsAt: Date.parse(resetsAt), at: clock.now() }])
+  expect(polledAtOf(file.text ?? '')).toBe(clock.now())
+  const ui = await $.ui.mount({ ...band(120), surface: 'desktop' })
+  expect(await ui.find({ text: /^ 44%$/ })).toBeDefined()
+  await ui.unmount()
+  // Another session's start inside the period finds the claim and does not ask again.
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  await settle()
+  expect(fetched.length).toBe(1)
+  await clock.advance(5 * 60_000)
+  await settle()
+  expect(fetched.length).toBe(2)
+})
+
+test('without quotaPoll the mod never asks the server', async ($, on) => {
+  mock.clock(on)
+  quotaFile(on)
+  let fetched = 0
+  on('ui.status', () => ({ value: undefined }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  on('session.id', () => ({ value: 'abc-123' }))
+  on('process.run', () => ({ value: { exitCode: 0, stderr: '', stdout: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }))
+  on('http.fetch', () => (fetched++, { value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  await new Promise(r => setTimeout(r, 0))
+  expect(fetched).toBe(0)
 })
 
 test('a restarted process shows the context its transcript last recorded', async ($, on) => {

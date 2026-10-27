@@ -17,6 +17,7 @@ Options go in `/config`, or in `settings.json` under `pluginConfigs["limits"].op
 | `cacheTtl` | `1h` | `5m` if the account has no extended prompt caching; a wrong value gives a wrong cache clock |
 | `palette` | `theme` | `pastel` for fixed hex colours on dark terminals |
 | `costCommand` | empty | argv (whitespace-split) the session id is appended to; enables the per-subagent cost hover |
+| `quotaPoll` | `off` | `5m` or `15m`: one session per config directory asks the server for the quota that often, so an idle band stays current |
 
 ### costCommand
 

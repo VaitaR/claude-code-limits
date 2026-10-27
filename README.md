@@ -73,6 +73,7 @@ In `/config`, or under `pluginConfigs["limits"].options` in `settings.json`:
 | `cacheTtl` | `1h` | the main loop's prompt-cache lifetime: `1h` with extended caching, `5m` otherwise |
 | `palette` | `theme` | `theme` follows your Claude Code theme (light, dark, colour-blind); `pastel` uses fixed colours tuned for dark terminals |
 | `costCommand` | empty | a command that prints the session's cost split as JSON; it is split on spaces into arguments, without quoting |
+| `quotaPoll` | `off` | `5m` or `15m`: one of your sessions asks the server for your 5h/7d quota that often, as `/usage` does, so the band stays current while every session is idle and counts use from claude.ai or another machine. Readings otherwise arrive only with a response |
 
 <details>
 <summary><strong>The <code>costCommand</code> contract</strong></summary>
@@ -124,8 +125,9 @@ The plugin ships a skill, **`customize-limits`**, that knows where each threshol
 | the tail of this session's transcript, at session start while no request or prompt has been seen yet, to start the cache clock, show the last prompt Claude Code recorded and the context of the last response | `sh -c tail -c 400000 ~/.claude/projects/*/<session id>.jsonl` |
 | the latest 5h/7d readings of every session under the same config directory, and this session's own into it, every 30 s and at each reading | `$.fs` on `<config dir>/state/limits/quota.json` (`CLAUDE_CONFIG_DIR`, else `~/.claude`) |
 | your `costCommand`'s output, if you set one | `$.process.run` |
+| your plan's quota from the server, if you set `quotaPoll`: one request per period across all sessions, with your claude.ai login, which Claude Code attaches and the mod never sees; an API key or another provider sends none | `$.session.authorize()`, `$.http.fetch` of `https://api.anthropic.com/api/oauth/usage` |
 
-It makes **no** network requests and calls no model; your `costCommand` runs as you wrote it. State lives in session atoms and ends with the session, except the quota file, which holds only the readings of the windows still open. `claude plugin validate .` prints exactly what it hooks and calls.
+It makes **no** network requests unless you set `quotaPoll`, and calls no model; your `costCommand` runs as you wrote it. State lives in session atoms and ends with the session, except the quota file, which holds only the readings of the windows still open. `claude plugin validate .` prints exactly what it hooks and calls.
 
 ## What is inferred, not measured
 

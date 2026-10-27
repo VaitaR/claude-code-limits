@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.0
+
+- `quotaPoll` (`off` by default; `5m` or `15m`): one session per config directory asks the server for the 5h/7d quota, as `/usage` does, so the band stays current while every session is idle and counts use from claude.ai or another machine. It is the mod's only network request, sent with the session's claude.ai login, which the mod never sees.
+
 ## 0.10.0
 
 - A quota whose window reset while every session sat idle stays on the band as an empty `0%` gauge, its hover giving the reset time and the figure before it, instead of disappearing until the next response.
