@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.0
+
+- `quotaLog`: a file each `quotaPoll` answer is appended to as one JSON line (`at`, `source`, then `pct` and `resetsAt` per window), to match the quota against your own cost and token data. Empty by default.
+- The shared quota file keeps only the 5h and 7d windows: an `extra_usage` reading that a 0.11.0 poll put into a session no longer comes back to the file.
+
 ## 0.11.1
 
 - A session no longer passes an old quota reading off as the latest: the engine hands a session its last reading again at every measurement and to a restarted process, and each was stamped as read just now, so an idle or restarted session could overwrite every band with a figure from days before (a 7d quota shown at 10% while it stood at 81%). A reading now counts as new only when it changed after a response.

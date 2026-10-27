@@ -18,6 +18,7 @@ Options go in `/config`, or in `settings.json` under `pluginConfigs["limits"].op
 | `palette` | `theme` | `pastel` for fixed hex colours on dark terminals |
 | `costCommand` | empty | argv (whitespace-split) the session id is appended to; enables the per-subagent cost hover |
 | `quotaPoll` | `off` | `5m` or `15m`: one session per config directory asks the server for the quota that often, so an idle band stays current |
+| `quotaLog` | empty | a path (`~/` allowed) each poll's answer is appended to as a JSON line; needs `quotaPoll` |
 
 ### costCommand
 
