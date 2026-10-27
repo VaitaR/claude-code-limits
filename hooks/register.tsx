@@ -16,6 +16,7 @@ import {
   fmtCacheLeft,
   fmtLeft,
   fmtUsd,
+  freshLimits,
   hasReset,
   gaugeCells,
   kTokens,
@@ -110,6 +111,11 @@ async function seedFromTranscript($: EngineInterface) {
  */
 const QUOTA_TICK_MS = 30_000
 let quotaTick: { cancel: () => void } | null = null
+/** The last reading the engine handed this process, stamped or not: what `freshLimits` compares against. */
+let engineLimits: Limit[] = []
+/** When this process last got a response, and the latest of those a measurement has looked at. */
+let answeredAt = 0
+let measuredUpTo = 0
 
 async function quotaPath($: EngineInterface): Promise<string | null> {
   // `$.env.get` takes literal names only: `claude plugin validate` lists what a mod reads.
@@ -234,14 +240,17 @@ export const register: Register = (on, options) => {
     // A host without usage (headless, an SDK host, a session not yet bound) just starts without it.
     const u = await $.session.usage().catch(() => null)
     if (u) {
-      const at = await $.clock.now()
+      // When this reading was read is unknown (a restarted process gets its last one back): unstamped, it
+      // fills a window no stamped reading has and loses to any that is.
+      const read = limitsOf(u.rateLimits)
+      engineLimits = read
       await update($, usage, x => ({
         ...normalize(DEFAULT_USAGE, x),
         pct: u.context.percent ?? null,
         tokens: u.context.tokens ?? null,
         window: u.context.window,
         costUsd: u.cost?.usd ?? null,
-        limits: mergeLimits(normalize(DEFAULT_USAGE, x).limits, limitsOf(u.rateLimits, at)),
+        limits: newestLimits(read, normalize(DEFAULT_USAGE, x).limits),
       }))
     }
     await Promise.all([seedFromTranscript($), readCompactWindow($)])
@@ -287,6 +296,7 @@ export const register: Register = (on, options) => {
     const sentAt = id ? 0 : await $.clock.now()
     const done = yield* next(e)
     const u = done.usage
+    if (u) answeredAt = await $.clock.now()
     if (u && id) await touch($, id, a => ({ ...a, model: u.model || a.model, tokens: contextTokens(u) }))
     else if (u) await update($, cacheAt, () => sentAt)
     return done
@@ -306,16 +316,20 @@ export const register: Register = (on, options) => {
 
   on('session.measure', async ($, e, next) => {
     const before = await getUsage($)
-    const at = await $.clock.now()
+    const read = limitsOf(e.rateLimits)
+    // A reading comes only with a response: with none since the last measurement this is an old one again.
+    const fresh = answeredAt > measuredUpTo ? freshLimits(read, engineLimits, await $.clock.now()) : []
+    measuredUpTo = answeredAt
+    engineLimits = mergeLimits(engineLimits, read)
     await update($, usage, x => ({
       ...normalize(DEFAULT_USAGE, x),
       pct: e.context.percent ?? null,
       tokens: e.context.tokens ?? null,
       window: e.context.window,
       costUsd: e.cost?.usd ?? null,
-      limits: mergeLimits(normalize(DEFAULT_USAGE, x).limits, limitsOf(e.rateLimits, at)),
+      limits: newestLimits(fresh, newestLimits(read, normalize(DEFAULT_USAGE, x).limits)),
     }))
-    if (e.rateLimits.length > 0) syncSoon($)
+    if (fresh.length > 0) syncSoon($)
     // A model switch changes the window; the compaction window follows it.
     if (before.window !== e.context.window) await readCompactWindow($)
     return next(e)

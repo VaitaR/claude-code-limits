@@ -141,6 +141,14 @@ export const mergeLimits = (prev: readonly Limit[], next: readonly Limit[]): Lim
   return [...next, ...prev.filter(l => !seen.has(l.kind))].sort(byRank)
 }
 
+/**
+ * The engine hands a session its last response's reading again at every measurement and to a restarted
+ * process, so only a reading that differs from the last one it handed is new and gets `at`. Stamped, an
+ * old figure would pass for the latest and overwrite fresher readings of other sessions.
+ */
+export const freshLimits = (read: readonly Limit[], seen: readonly Limit[], at: number): Limit[] =>
+  read.filter(l => !seen.some(s => s.kind === l.kind && s.pct === l.pct && s.resetsAt === l.resetsAt)).map(l => ({ ...l, at }))
+
 /** Past its reset a reading says nothing about the new window but that no session here has read it yet. */
 export const hasReset = (l: Limit, now: number) => !live(l, now)
 
@@ -199,7 +207,8 @@ export const usageReplyLimits = (text: string, readAt: number): Limit[] => {
   if (!isObject(o)) return []
   return Object.entries(o)
     .flatMap(([kind, w]) => {
-      if (!isObject(w) || typeof w.utilization !== 'number' || !Number.isFinite(w.utilization)) return []
+      // `extra_usage` and the like share the shape but are no window of the plan.
+      if (!/^(five_hour|seven_day)/.test(kind) || !isObject(w) || typeof w.utilization !== 'number' || !Number.isFinite(w.utilization)) return []
       const at = typeof w.resets_at === 'string' ? Date.parse(w.resets_at) : NaN
       return [{ kind, pct: w.utilization, resetsAt: Number.isFinite(at) ? at : null, at: readAt }]
     })
