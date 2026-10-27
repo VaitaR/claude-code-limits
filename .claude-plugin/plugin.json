@@ -1,6 +1,6 @@
 {
   "name": "limits",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Claude Code mod: your 5h/7d quota, context window, prompt-cache time left and session cost on one line above the prompt, with per-subagent cost on hover",
   "author": {
     "name": "Andrei Shivalin",
@@ -48,6 +48,17 @@
       "description": "Command that prints a session's cost split by main thread and subagent as JSON (see the README); the session id is appended. Empty: the cost hover shows the total only",
       "type": "string",
       "default": ""
+    },
+    "quotaPoll": {
+      "title": "Ask the server for the quota",
+      "description": "How often one session asks api.anthropic.com for your 5h/7d quota, as /usage does, so the band stays current while every session is idle. off: readings arrive only with a response",
+      "type": "string",
+      "options": [
+        "off",
+        "5m",
+        "15m"
+      ],
+      "default": "off"
     }
   }
 }

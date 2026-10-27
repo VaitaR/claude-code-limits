@@ -37,6 +37,8 @@ export type Config = {
   costCommand: string[]
   /** The prompt cache's lifetime: the engine reports no 5m/1h split, so the person names theirs. */
   cacheTtlMs: number
+  /** How often one session of the config directory asks the server for the quota; 0: never. */
+  quotaPollMs: number
 }
 
 /** The plugin's `/config` values, read leniently: anything malformed falls back to the default. */
@@ -46,6 +48,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     palette: str('palette', 'theme') === 'pastel' ? 'pastel' : 'theme',
     costCommand: str('costCommand', '').trim().split(/\s+/).filter(Boolean),
     cacheTtlMs: str('cacheTtl', '1h') === '5m' ? 300_000 : 3_600_000,
+    quotaPollMs: ({ '5m': 300_000, '15m': 900_000 } as Record<string, number>)[str('quotaPoll', 'off')] ?? 0,
   }
 }
 
@@ -169,6 +172,38 @@ export const parseQuota = (text: string): Limit[] => {
       ? [{ kind: l.kind, pct: l.pct as number, resetsAt: num(l.resetsAt) ? (l.resetsAt as number) : null, at: l.at as number }]
       : [],
   )
+}
+
+/** When a session last asked the server for the quota, from the shared file; 0 when none has. */
+export const polledAtOf = (text: string): number => {
+  try {
+    const o: unknown = JSON.parse(text)
+    return isObject(o) && typeof o.polledAt === 'number' && Number.isFinite(o.polledAt) ? o.polledAt : 0
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * The server's quota answer (`GET /api/oauth/usage`, what `/usage` shows): per window
+ * `{ utilization: 0-100, resets_at: ISO }`, null for a window the plan lacks. Undocumented, so read
+ * leniently: anything else is no reading.
+ */
+export const usageReplyLimits = (text: string, readAt: number): Limit[] => {
+  let o: unknown
+  try {
+    o = JSON.parse(text)
+  } catch {
+    return []
+  }
+  if (!isObject(o)) return []
+  return Object.entries(o)
+    .flatMap(([kind, w]) => {
+      if (!isObject(w) || typeof w.utilization !== 'number' || !Number.isFinite(w.utilization)) return []
+      const at = typeof w.resets_at === 'string' ? Date.parse(w.resets_at) : NaN
+      return [{ kind, pct: w.utilization, resetsAt: Number.isFinite(at) ? at : null, at: readAt }]
+    })
+    .sort(byRank)
 }
 
 /** A rate-limit window's short name: `five_hour` → `5h`, `seven_day_opus` → `7d opus`. */

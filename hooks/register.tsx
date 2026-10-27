@@ -32,10 +32,12 @@ import {
   parseCostSplit,
   parseQuota,
   plural,
+  polledAtOf,
   promptLine,
   quotaLevel,
   shorten,
   splitLines,
+  usageReplyLimits,
 } from './core'
 import type { Config } from './core'
 
@@ -119,14 +121,17 @@ async function quotaPath($: EngineInterface): Promise<string | null> {
 
 const sameLimits = (a: readonly Limit[], b: readonly Limit[]) => JSON.stringify(a) === JSON.stringify(b)
 
+const writeQuota = ($: EngineInterface, path: string, limits: readonly Limit[], polledAt: number) =>
+  $.fs.write(path, JSON.stringify(polledAt ? { limits, polledAt } : { limits }))
+
 /** Ours into the file where newer than what it holds, the others' into ours. A failure leaves both as they were. */
-async function syncQuota($: EngineInterface) {
+async function syncQuota($: EngineInterface, read: readonly Limit[] = []) {
   const path = await quotaPath($)
   if (!path) return
   const [text, own] = await Promise.all([$.fs.read(path).catch(() => ''), getUsage($)])
   const shared = parseQuota(text)
-  const merged = newestLimits(own.limits, shared)
-  if (!sameLimits(merged, shared)) await $.fs.write(path, JSON.stringify({ limits: merged }))
+  const merged = newestLimits(newestLimits(own.limits, read), shared)
+  if (!sameLimits(merged, shared)) await writeQuota($, path, merged, polledAtOf(text))
   if (!sameLimits(merged, own.limits)) {
     await update($, usage, x => {
       const u = normalize(DEFAULT_USAGE, x)
@@ -135,6 +140,33 @@ async function syncQuota($: EngineInterface) {
   }
 }
 const syncSoon = ($: EngineInterface) => void syncQuota($).catch(() => undefined)
+
+/**
+ * Readings come only with a response, so while every session sits idle none is fresh, and use elsewhere
+ * (claude.ai, another machine) never shows. With `quotaPoll` set, the first session whose tick finds the
+ * file's `polledAt` older than the period claims it and asks the server, as `/usage` does.
+ */
+const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
+
+async function pollQuota($: EngineInterface, cfg: Config) {
+  if (cfg.quotaPollMs === 0) return
+  const path = await quotaPath($)
+  if (!path) return
+  const text = await $.fs.read(path).catch(() => '')
+  const now = await $.clock.now()
+  const last = polledAtOf(text)
+  if (last > 0 && now - last < cfg.quotaPollMs) return
+  // Claimed before the request, so the other sessions' ticks skip this period; a failed request waits it out.
+  await writeQuota($, path, parseQuota(text), now)
+  // The endpoint takes a claude.ai login only: an API key or a 3P provider has no plan quota to read.
+  const auth = await $.session.authorize().catch(() => null)
+  if (auth?.kind !== 'bearer') return
+  const r = await $.http.fetch(USAGE_URL, { auth: auth.handle, headers: { 'anthropic-beta': 'oauth-2025-04-20' } })
+  if (!r.ok) return
+  const read = usageReplyLimits(r.text, await $.clock.now())
+  if (read.length > 0) await syncQuota($, read)
+}
+const pollSoon = ($: EngineInterface, cfg: Config) => void pollQuota($, cfg).catch(() => undefined)
 
 /**
  * The window Claude Code compacts against: `autoCompactWindow` from settings, or the model's own limit.
@@ -214,9 +246,10 @@ export const register: Register = (on, options) => {
     }
     await Promise.all([seedFromTranscript($), readCompactWindow($)])
     syncSoon($)
+    pollSoon($, cfg)
     // A hot reload loads the module again and cancels its timers; session.start runs for the new one.
     quotaTick?.cancel()
-    quotaTick = $.clock.every(QUOTA_TICK_MS, () => syncSoon($))
+    quotaTick = $.clock.every(QUOTA_TICK_MS, () => (syncSoon($), pollSoon($, cfg)))
     void refreshSplit($, cfg).catch(() => undefined)
     return next(e)
   })
