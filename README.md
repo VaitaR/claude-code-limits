@@ -130,7 +130,7 @@ It makes **no** network requests and calls no model; your `costCommand` runs as 
 ## What is inferred, not measured
 
 - **The cache clock** starts when the main loop's last answered request was sent and runs for `cacheTtl`. The engine reports no TTL, so a wrong `cacheTtl` gives a wrong clock. A compaction sets the cache to cold.
-- **Quotas are account-wide.** Parallel sessions spend the same windows, so every session shows the latest reading any of them received (the hover says when it was read): an idle session lags by up to 30 s behind a busy one, and with no session busy the figure is as old as the last response. A window past its reset is not drawn until the next reading. Sessions share readings through their config directory, so two accounts under two directories never mix.
+- **Quotas are account-wide.** Parallel sessions spend the same windows, so every session shows the latest reading any of them received (the hover says when it was read): an idle session lags by up to 30 s behind a busy one, and with no session busy the figure is as old as the last response. A window past its reset stays drawn as an empty `0%` gauge until the next reading: no session here has used it since, though another device may have. Sessions share readings through their config directory, so two accounts under two directories never mix.
 - **After a restart** (the desktop app stops a hidden session's process after a while idle, and starts it again when you come back) the context gauge shows the transcript's last response until the next one; the compaction count starts from zero.
 - **Cost is the engine's API-price figure.** On a subscription it is what the session would cost at API prices, not a bill.
 

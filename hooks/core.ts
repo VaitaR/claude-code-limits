@@ -129,26 +129,25 @@ const byRank = (a: Limit, b: Limit) => rank(a.kind) - rank(b.kind)
 const live = (l: Limit, now: number) => l.resetsAt == null || l.resetsAt > now
 
 /**
- * A reading without a window keeps the last one until it resets: some responses carry no rate-limit
- * headers, and an empty reading would otherwise blank the quotas until the next one that does.
+ * A reading without a window keeps the last one: some responses carry no rate-limit headers, and an empty
+ * reading would otherwise blank the quotas until the next one that does. Past its reset it is kept too, so
+ * an idle band still shows the window, as reset.
  */
-export const mergeLimits = (prev: readonly Limit[], next: readonly Limit[], now: number): Limit[] => {
+export const mergeLimits = (prev: readonly Limit[], next: readonly Limit[]): Limit[] => {
   const seen = new Set(next.map(l => l.kind))
-  const kept = prev.filter(l => !seen.has(l.kind) && live(l, now))
-  return [...next, ...kept].sort(byRank)
+  return [...next, ...prev.filter(l => !seen.has(l.kind))].sort(byRank)
 }
 
-/** Windows still open at `now`: past its reset a reading says nothing about the new window. */
-export const freshLimits = (limits: readonly Limit[], now: number): Limit[] => limits.filter(l => live(l, now))
+/** Past its reset a reading says nothing about the new window but that no session here has read it yet. */
+export const hasReset = (l: Limit, now: number) => !live(l, now)
 
 /**
  * Quotas are account-wide, so the latest reading of any session is the right one: per window, the reading
- * read last wins (one without `at` loses to any with it), and windows past their reset are dropped.
+ * read last wins (one without `at` loses to any with it). A reading of the new window is always read later.
  */
-export const newestLimits = (a: readonly Limit[], b: readonly Limit[], now: number): Limit[] => {
+export const newestLimits = (a: readonly Limit[], b: readonly Limit[]): Limit[] => {
   const best = new Map<string, Limit>()
   for (const l of [...a, ...b]) {
-    if (!live(l, now)) continue
     const prev = best.get(l.kind)
     if (!prev || (l.at ?? 0) > (prev.at ?? 0)) best.set(l.kind, l)
   }

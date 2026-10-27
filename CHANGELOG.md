@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0
+
+- A quota whose window reset while every session sat idle stays on the band as an empty `0%` gauge, its hover giving the reset time and the figure before it, instead of disappearing until the next response.
+
 ## 0.9.0
 
 - Quotas are shared by every session of one config directory: an idle or restarted session shows the latest 5h/7d reading any session received, and the hover says when it was read.

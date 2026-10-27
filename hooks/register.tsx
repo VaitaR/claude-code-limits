@@ -16,7 +16,7 @@ import {
   fmtCacheLeft,
   fmtLeft,
   fmtUsd,
-  freshLimits,
+  hasReset,
   gaugeCells,
   kTokens,
   lastContextOf,
@@ -123,14 +123,14 @@ const sameLimits = (a: readonly Limit[], b: readonly Limit[]) => JSON.stringify(
 async function syncQuota($: EngineInterface) {
   const path = await quotaPath($)
   if (!path) return
-  const [text, own, now] = await Promise.all([$.fs.read(path).catch(() => ''), getUsage($), $.clock.now()])
+  const [text, own] = await Promise.all([$.fs.read(path).catch(() => ''), getUsage($)])
   const shared = parseQuota(text)
-  const merged = newestLimits(own.limits, shared, now)
-  if (!sameLimits(merged, freshLimits(shared, now))) await $.fs.write(path, JSON.stringify({ limits: merged }))
-  if (!sameLimits(merged, freshLimits(own.limits, now))) {
+  const merged = newestLimits(own.limits, shared)
+  if (!sameLimits(merged, shared)) await $.fs.write(path, JSON.stringify({ limits: merged }))
+  if (!sameLimits(merged, own.limits)) {
     await update($, usage, x => {
       const u = normalize(DEFAULT_USAGE, x)
-      return { ...u, limits: newestLimits(u.limits, merged, now) }
+      return { ...u, limits: newestLimits(u.limits, merged) }
     })
   }
 }
@@ -209,7 +209,7 @@ export const register: Register = (on, options) => {
         tokens: u.context.tokens ?? null,
         window: u.context.window,
         costUsd: u.cost?.usd ?? null,
-        limits: mergeLimits(normalize(DEFAULT_USAGE, x).limits, limitsOf(u.rateLimits, at), at),
+        limits: mergeLimits(normalize(DEFAULT_USAGE, x).limits, limitsOf(u.rateLimits, at)),
       }))
     }
     await Promise.all([seedFromTranscript($), readCompactWindow($)])
@@ -280,7 +280,7 @@ export const register: Register = (on, options) => {
       tokens: e.context.tokens ?? null,
       window: e.context.window,
       costUsd: e.cost?.usd ?? null,
-      limits: mergeLimits(normalize(DEFAULT_USAGE, x).limits, limitsOf(e.rateLimits, at), at),
+      limits: mergeLimits(normalize(DEFAULT_USAGE, x).limits, limitsOf(e.rateLimits, at)),
     }))
     if (e.rateLimits.length > 0) syncSoon($)
     // A model switch changes the window; the compaction window follows it.
@@ -371,8 +371,26 @@ export const register: Register = (on, options) => {
       ]
     }
 
-    for (const l of freshLimits(u.limits, now).filter(l => l.kind === 'five_hour' || l.kind === 'seven_day')) {
+    for (const l of u.limits.filter(l => l.kind === 'five_hour' || l.kind === 'seven_day')) {
       const label = limitLabel(l.kind)
+      // An idle band keeps the gauge rather than losing it: a reset window holds what was used of it since,
+      // none by this machine's sessions, which would have read it.
+      if (hasReset(l, now)) {
+        add(
+          `quota-${l.kind}`,
+          <Box>
+            <Text dimColor>{`${label} `}</Text>
+            <Text color={C.faint}>{'━'.repeat(6)}</Text>
+            <Text dimColor>{' 0%'}</Text>
+          </Box>,
+          [
+            `${label} · reset ${fmtAt(l.resetsAt ?? now, now)}, not read since: 0% unless used from another device`,
+            `${Math.round(l.pct)}% before the reset${l.at ? `, read ${fmtAt(l.at, now)}` : ''} · the next response reads it`,
+          ],
+          gauge(label, 0),
+        )
+        continue
+      }
       add(
         `quota-${l.kind}`,
         <Box>

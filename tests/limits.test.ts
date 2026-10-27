@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { activityOf, agentLines, fmtAgo, fmtAt, fmtCacheLeft, fmtElapsed, fmtLeft, gaugeCells, modelLabel, freshLimits, lastContextOf, lastPromptOf, lastRequestAt, mergeLimits, newestLimits, parseQuota, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
+import { activityOf, agentLines, fmtAgo, fmtAt, fmtCacheLeft, fmtElapsed, fmtLeft, gaugeCells, modelLabel, hasReset, lastContextOf, lastPromptOf, lastRequestAt, mergeLimits, newestLimits, parseQuota, parseConfig, parseCostSplit, promptLine, quotaLevel, splitLines } from '../hooks/core'
 
 // The type lib is es2023 alone; the test runtime has timers.
 declare function setTimeout(fn: (value?: unknown) => void, ms: number): unknown
@@ -36,22 +36,22 @@ test('an age reads as time elapsed', () => {
   expect([fmtAgo(59_000), fmtAgo(5 * 60_000), fmtAgo(65 * 60_000), fmtAgo((51 * 60 + 2) * 60_000)]).toEqual(['just now', '5m ago', '1h05m ago', '2d03h ago'])
 })
 
-test('a reading without a window keeps the last one until it resets', () => {
+test('a reading without a window keeps the last one, past its reset too', () => {
   const h5 = { kind: 'five_hour', pct: 6, resetsAt: 5_000 }
   const d7 = { kind: 'seven_day', pct: 46, resetsAt: 9_000 }
-  expect(mergeLimits([h5, d7], [], 1_000)).toEqual([h5, d7])
-  expect(mergeLimits([h5, d7], [{ ...d7, pct: 47 }], 1_000)).toEqual([h5, { ...d7, pct: 47 }]) // order holds
-  expect(mergeLimits([h5, d7], [], 6_000)).toEqual([d7]) // the 5h window reset: its old reading is gone
+  expect(mergeLimits([h5, d7], [])).toEqual([h5, d7])
+  expect(mergeLimits([h5, d7], [{ ...d7, pct: 47 }])).toEqual([h5, { ...d7, pct: 47 }]) // order holds
+  expect([hasReset(h5, 6_000), hasReset(d7, 6_000), hasReset({ ...d7, resetsAt: null }, 6_000)]).toEqual([true, false, false])
 })
 
-test('a window past its reset is not drawn, and the newest reading of each window wins across sessions', () => {
+test('the newest reading of each window wins across sessions, a reset one included', () => {
   const h5 = { kind: 'five_hour', pct: 6, resetsAt: 5_000, at: 100 }
   const d7 = { kind: 'seven_day', pct: 46, resetsAt: 9_000, at: 100 }
-  expect(freshLimits([h5, d7], 6_000)).toEqual([d7])
   const other = [{ ...h5, pct: 30, at: 200 }, { ...d7, pct: 40, at: 50 }]
-  expect(newestLimits([d7, h5], other, 1_000)).toEqual([other[0], d7]) // per window, ranked 5h first
-  expect(newestLimits([h5], other, 6_000)).toEqual([other[1]]) // a reset window is dropped from both
-  expect(newestLimits([{ kind: 'five_hour', pct: 1 }], [h5], 1_000)).toEqual([h5]) // a reading without `at` loses
+  expect(newestLimits([d7, h5], other)).toEqual([other[0], d7]) // per window, ranked 5h first
+  const next = { kind: 'five_hour', pct: 2, resetsAt: 20_000, at: 6_000 }
+  expect(newestLimits([h5], [next])).toEqual([next]) // the new window's reading replaces the reset one
+  expect(newestLimits([{ kind: 'five_hour', pct: 1 }], [h5])).toEqual([h5]) // a reading without `at` loses
 })
 
 test('the shared quota file is read leniently', () => {
@@ -578,7 +578,8 @@ test('a session with no reading of its own shows the latest one another session 
   await new Promise(r => setTimeout(r, 0))
   const ui = await $.ui.mount({ ...band(120), surface: 'desktop' })
   expect(await ui.find({ text: /^ 41%$/ })).toBeDefined()
-  expect(await ui.find({ text: /^7d $/ })).toBeUndefined() // its window reset since: no stale gauge
+  expect(await ui.find({ text: /^7d $/ })).toBeDefined() // its window reset since: drawn as reset, not stale
+  expect(await ui.find({ text: /^ 12%$/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -620,7 +621,7 @@ test('a restarted process shows the context its transcript last recorded', async
   await ui.unmount()
 })
 
-test('a quota whose window reset while the session sat idle is no longer drawn', async ($, on) => {
+test('a quota whose window reset while the session sat idle stays drawn, as reset', async ($, on) => {
   const clock = mock.clock(on)
   await clock.advance(60_000)
   on('ui.status', () => ({ value: undefined }))
@@ -631,6 +632,9 @@ test('a quota whose window reset while the session sat idle is no longer drawn',
   await clock.advance(2 * 60_000)
   const ui = await $.ui.mount({ ...band(120), surface: 'desktop' })
   expect(await ui.find({ text: /^ 88%$/ })).toBeUndefined()
+  expect(await ui.find({ text: /^5h $/ })).toBeDefined()
+  expect(await ui.find({ text: /^ 0%$/ })).toBeDefined()
+  expect(await ui.find({ text: /88% before the reset/ })).toBeDefined()
   expect(await ui.find({ text: /^ 12%$/ })).toBeDefined()
   await ui.unmount()
 })
