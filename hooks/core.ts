@@ -61,10 +61,13 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
 // ---------------------------------------------------------------- session ref
 
 // Single-quoted in the copied shell line, so the filter itself must hold no single quote.
+// A long session's dialogue runs to hundreds of KB: keep its first message (the original ask) and the newest part.
 const DIALOGUE_JQ =
-  'select((.type=="user" or .type=="assistant") and .isMeta != true)' +
-  ' | (.message.content | if type=="string" then . else (map(select(.type=="text") | .text) | join("\\n")) end) as $t' +
-  ' | select($t != "") | "[" + .type + "] " + $t'
+  '[.[] | select((.type=="user" or .type=="assistant") and .isMeta != true)' +
+  ' | (.message.content | if type=="string" then . else (map(if .type=="text" then .text elif .type=="image" then "[image]" else empty end) | join("\\n")) end) as $t' +
+  ' | select($t != "") | "[" + .type + "] " + $t]' +
+  ' | join("\\n\\n") as $all | if ($all | length) <= 40000 then $all' +
+  ' else .[0][:4000] + "\\n\\n[... earlier dialogue cut ...]\\n\\n" + $all[-36000:] end'
 
 /** What `⧉ ref` copies: enough for another agent to find and read this session's transcript unaided. */
 export const sessionRef = (f: { id: string; transcript: string; bytes: string; cwd: string; branch: string; subagents: string }) => {
@@ -76,8 +79,8 @@ export const sessionRef = (f: { id: string; transcript: string; bytes: string; c
     `transcript: ${path}${size}  -- JSONL, one event per line; type user|assistant, text in .message.content`,
     f.subagents ? `subagent transcripts: ${f.subagents}` : '',
     `cwd: ${f.cwd}${f.branch ? `  (git branch ${f.branch})` : ''}`,
-    'Dialogue without tool output, newest last:',
-    `  jq -r '${DIALOGUE_JQ}' ${path} | tail -c 40000`,
+    'Dialogue without tool output (the first message, then the newest ~36k chars):',
+    `  jq -rs '${DIALOGUE_JQ}' ${path}`,
     `Search: rg -n -m 20 'PATTERN' ${path}`,
   ]
     .filter(Boolean)
