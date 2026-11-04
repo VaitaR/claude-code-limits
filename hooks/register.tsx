@@ -37,6 +37,7 @@ import {
   promptLine,
   quotaLevel,
   quotaLogLine,
+  sessionRef,
   shorten,
   splitLines,
   usageReplyLimits,
@@ -237,6 +238,29 @@ async function costNow($: EngineInterface): Promise<number | null> {
   return u?.cost?.usd ?? null
 }
 
+async function sh($: EngineInterface, script: string, args: readonly string[]): Promise<string> {
+  const r = await $.process.run(['/bin/sh', '-c', script, 'sh', ...args], { timeoutMs: 10_000 }).catch(() => null)
+  return r?.exitCode === 0 ? r.stdout.trim() : ''
+}
+
+// pbcopy first: `$.ui.copy` has no path on the desktop app's surface.
+async function copyRef($: EngineInterface) {
+  const id = await $.session.id()
+  const cwd = await $.session.cwd()
+  const transcript = await sh($, 'ls "$HOME"/.claude/projects/*/"$1".jsonl 2>/dev/null | head -1', [id])
+  const text = sessionRef({
+    id,
+    transcript,
+    bytes: transcript ? await sh($, 'wc -c < "$1"', [transcript]) : '',
+    cwd,
+    branch: await sh($, 'git -C "$1" branch --show-current 2>/dev/null', [cwd]),
+    subagents: transcript ? await sh($, 'd="${1%.jsonl}/subagents"; [ -d "$d" ] && echo "$d/*.jsonl"', [transcript]) : '',
+  })
+  const piped = await $.process.run(['pbcopy'], { stdin: text, timeoutMs: 5_000 }).catch(() => null)
+  const isCopied = piped?.exitCode === 0 || (await $.ui.copy({ text })).isCopied
+  $.ui.toast(isCopied ? `Session ref copied (${id.slice(0, 8)})` : 'Session ref: no clipboard to copy to')
+}
+
 async function resetAll($: EngineInterface) {
   await update($, cacheAt, () => 0)
   await update($, running, () => [])
@@ -404,7 +428,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const els = $.ui.resolve(e)
-    const { Box, Text } = els
+    const { Box, Button, Text } = els
     const hasClient = 'Client' in els
     const [u, agents, cache, now, lastTurn, sp, ps] = await Promise.all([
       getUsage($),
@@ -533,6 +557,16 @@ export const register: Register = (on, options) => {
         <Text color={C.agent}>{label}</Text>,
         agentLines(agents, now),
         label,
+      )
+    }
+
+    // An action, the band's only one: pressing it starts no turn and leaves the transcript alone.
+    if (cfg.copyRef) {
+      add(
+        'ref',
+        <Button key="band-ref" label="⧉ ref" onPress={() => copyRef($)} />,
+        ['copy a pointer to this session for another agent', 'its id, transcript path, cwd and how to read the transcript'],
+        '[ ⧉ ref ]',
       )
     }
 

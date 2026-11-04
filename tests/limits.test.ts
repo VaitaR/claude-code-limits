@@ -19,15 +19,16 @@ const answering = (on: On) =>
 // ---------------------------------------------------------------- pure behaviour
 
 test('config is read leniently: bad values fall back to defaults', () => {
-  expect(parseConfig({})).toEqual({ palette: 'theme', costCommand: [], cacheTtlMs: 3_600_000, quotaPollMs: 0, quotaLog: '' })
-  expect(parseConfig({ palette: 'pastel', costCommand: '  python3   /x/cost.py ', cacheTtl: '5m', quotaPoll: '15m', quotaLog: ' ~/q.jsonl ' })).toEqual({
+  expect(parseConfig({})).toEqual({ palette: 'theme', costCommand: [], cacheTtlMs: 3_600_000, quotaPollMs: 0, quotaLog: '', copyRef: false })
+  expect(parseConfig({ palette: 'pastel', costCommand: '  python3   /x/cost.py ', cacheTtl: '5m', quotaPoll: '15m', quotaLog: ' ~/q.jsonl ', copyRef: true })).toEqual({
     palette: 'pastel',
     costCommand: ['python3', '/x/cost.py'],
     cacheTtlMs: 300_000,
     quotaPollMs: 900_000,
     quotaLog: '~/q.jsonl',
+    copyRef: true,
   })
-  expect(parseConfig({ palette: 7, costCommand: null, cacheTtl: 'forever', quotaPoll: '1s' })).toEqual(parseConfig({}))
+  expect(parseConfig({ palette: 7, costCommand: null, cacheTtl: 'forever', quotaPoll: '1s', copyRef: 'yes' })).toEqual(parseConfig({}))
 })
 
 test('a quota colours by what is used', () => {
@@ -811,5 +812,49 @@ test('a quota whose window reset while the session sat idle stays drawn, as rese
   expect(await ui.find({ text: /^ 0%$/ })).toBeDefined()
   expect(await ui.find({ text: /88% before the reset/ })).toBeDefined()
   expect(await ui.find({ text: /^ 12%$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('copyRef draws a button that copies a pointer to the session, with no turn, on both surfaces', { options: { copyRef: true } }, async ($, on) => {
+  engine(on)
+  let copied = ''
+  const toasts: string[] = []
+  const ran = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('session.id', () => ({ value: 'abc12345-0000' }))
+  on('session.cwd', () => ({ value: '/w' }))
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('process.run', (_$, e) => {
+    if (e.argv[0] === 'pbcopy') {
+      copied = e.init?.stdin ?? ''
+      return ran('')
+    }
+    const script = e.argv[2] ?? ''
+    if (script.startsWith('ls ')) return ran('/h/.claude/projects/-w/abc12345-0000.jsonl\n')
+    if (script.startsWith('wc ')) return ran('20480\n')
+    if (script.startsWith('git ')) return ran('main\n')
+    return ran('', 1)
+  })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    copied = ''
+    toasts.length = 0
+    const ui = await $.ui.mount({ ...band(120, false, true), surface })
+    await ui.press({ key: 'band-ref' })
+    expect([surface, copied.split('\n').slice(1, 3)]).toEqual([
+      surface,
+      ['session_id: abc12345-0000', 'transcript: /h/.claude/projects/-w/abc12345-0000.jsonl (20 KB)  -- JSONL, one event per line; type user|assistant, text in .message.content'],
+    ])
+    expect([surface, copied]).toEqual([surface, expect.stringContaining("jq -r 'select((.type==\"user\"")])
+    expect([surface, toasts]).toEqual([surface, ['Session ref copied (abc12345)']])
+    await ui.unmount()
+  }
+})
+
+test('without copyRef the band draws no button', async ($, on) => {
+  engine(on)
+  const ui = await $.ui.mount({ ...band(120), surface: 'desktop' })
+  expect(await ui.find({ key: 'band-ref' })).toBeUndefined()
   await ui.unmount()
 })

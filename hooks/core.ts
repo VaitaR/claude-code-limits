@@ -41,6 +41,8 @@ export type Config = {
   quotaPollMs: number
   /** A file each poll's answer is appended to as one JSON line; `~/` is the home directory. Empty: no log. */
   quotaLog: string
+  /** Draws the `⧉ ref` button, which copies a pointer to this session for another agent. */
+  copyRef: boolean
 }
 
 /** The plugin's `/config` values, read leniently: anything malformed falls back to the default. */
@@ -52,7 +54,34 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     cacheTtlMs: str('cacheTtl', '1h') === '5m' ? 300_000 : 3_600_000,
     quotaPollMs: ({ '5m': 300_000, '15m': 900_000 } as Record<string, number>)[str('quotaPoll', 'off')] ?? 0,
     quotaLog: str('quotaLog', '').trim(),
+    copyRef: o.copyRef === true,
   }
+}
+
+// ---------------------------------------------------------------- session ref
+
+// Single-quoted in the copied shell line, so the filter itself must hold no single quote.
+const DIALOGUE_JQ =
+  'select((.type=="user" or .type=="assistant") and .isMeta != true)' +
+  ' | (.message.content | if type=="string" then . else (map(select(.type=="text") | .text) | join("\\n")) end) as $t' +
+  ' | select($t != "") | "[" + .type + "] " + $t'
+
+/** What `⧉ ref` copies: enough for another agent to find and read this session's transcript unaided. */
+export const sessionRef = (f: { id: string; transcript: string; bytes: string; cwd: string; branch: string; subagents: string }) => {
+  const path = f.transcript || `~/.claude/projects/*/${f.id}.jsonl`
+  const size = f.bytes ? ` (${Math.round(Number(f.bytes) / 1024)} KB)` : ''
+  return [
+    'Context from another Claude Code session. Read its transcript only as far as your task needs; never write to it.',
+    `session_id: ${f.id}`,
+    `transcript: ${path}${size}  -- JSONL, one event per line; type user|assistant, text in .message.content`,
+    f.subagents ? `subagent transcripts: ${f.subagents}` : '',
+    `cwd: ${f.cwd}${f.branch ? `  (git branch ${f.branch})` : ''}`,
+    'Dialogue without tool output, newest last:',
+    `  jq -r '${DIALOGUE_JQ}' ${path} | tail -c 40000`,
+    `Search: rg -n -m 20 'PATTERN' ${path}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 // ---------------------------------------------------------------- palette
