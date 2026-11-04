@@ -60,31 +60,17 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
 
 // ---------------------------------------------------------------- session ref
 
-// Single-quoted in the copied shell line, so the filter itself must hold no single quote.
-// A long session's dialogue runs to hundreds of KB: keep its first message (the original ask) and the newest part.
-const DIALOGUE_JQ =
-  '[.[] | select((.type=="user" or .type=="assistant") and .isMeta != true)' +
-  ' | (.message.content | if type=="string" then . else (map(if .type=="text" then .text elif .type=="image" then "[image]" else empty end) | join("\\n")) end) as $t' +
-  ' | select($t != "") | "[" + .type + "] " + $t]' +
-  ' | join("\\n\\n") as $all | if ($all | length) <= 40000 then $all' +
-  ' else .[0][:4000] + "\\n\\n[... earlier dialogue cut ...]\\n\\n" + $all[-36000:] end'
-
-/** What `⧉ ref` copies: enough for another agent to find and read this session's transcript unaided. */
-export const sessionRef = (f: { id: string; transcript: string; bytes: string; cwd: string; branch: string; subagents: string }) => {
-  const path = f.transcript || `~/.claude/projects/*/${f.id}.jsonl`
+/**
+ * What `⧉ ref` copies: where another agent finds this session's transcript and how to tell the dialogue
+ * from the rest. Agents read a JSONL file unaided; a ready-made command only lengthened the paste.
+ */
+export const sessionRef = (f: { id: string; transcript: string; bytes: string; cwd: string; branch: string }) => {
   const size = f.bytes ? ` (${Math.round(Number(f.bytes) / 1024)} KB)` : ''
   return [
-    'Context from another Claude Code session. Read its transcript only as far as your task needs; never write to it.',
-    `session_id: ${f.id}`,
-    `transcript: ${path}${size}  -- JSONL, one event per line; type user|assistant, text in .message.content`,
-    f.subagents ? `subagent transcripts: ${f.subagents}` : '',
-    `cwd: ${f.cwd}${f.branch ? `  (git branch ${f.branch})` : ''}`,
-    'Dialogue without tool output (the first message, then the newest ~36k chars):',
-    `  jq -rs '${DIALOGUE_JQ}' ${path}`,
-    `Search: rg -n -m 20 'PATTERN' ${path}`,
-  ]
-    .filter(Boolean)
-    .join('\n')
+    `Claude Code session ${f.id} (cwd ${f.cwd}${f.branch ? `, branch ${f.branch}` : ''})`,
+    `transcript: ${f.transcript || `~/.claude/projects/*/${f.id}.jsonl`}${size}`,
+    'JSONL: the dialogue is the text blocks of "user"/"assistant" rows; the rest is tool calls and their output.',
+  ].join('\n')
 }
 
 // ---------------------------------------------------------------- palette

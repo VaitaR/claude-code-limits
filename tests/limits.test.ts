@@ -842,11 +842,14 @@ test('copyRef draws a button that copies a pointer to the session, with no turn,
     toasts.length = 0
     const ui = await $.ui.mount({ ...band(120, false, true), surface })
     await ui.press({ key: 'band-ref' })
-    expect([surface, copied.split('\n').slice(1, 3)]).toEqual([
+    expect([surface, copied.split('\n')]).toEqual([
       surface,
-      ['session_id: abc12345-0000', 'transcript: /h/.claude/projects/-w/abc12345-0000.jsonl (20 KB)  -- JSONL, one event per line; type user|assistant, text in .message.content'],
+      [
+        'Claude Code session abc12345-0000 (cwd /w, branch main)',
+        'transcript: /h/.claude/projects/-w/abc12345-0000.jsonl (20 KB)',
+        'JSONL: the dialogue is the text blocks of "user"/"assistant" rows; the rest is tool calls and their output.',
+      ],
     ])
-    expect([surface, copied]).toEqual([surface, expect.stringContaining("jq -rs '[.[] | select((.type==\"user\"")])
     expect([surface, toasts]).toEqual([surface, ['Session ref copied (abc12345)']])
     await ui.unmount()
   }

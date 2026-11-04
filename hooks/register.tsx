@@ -254,7 +254,6 @@ async function copyRef($: EngineInterface) {
     bytes: transcript ? await sh($, 'wc -c < "$1"', [transcript]) : '',
     cwd,
     branch: await sh($, 'git -C "$1" branch --show-current 2>/dev/null', [cwd]),
-    subagents: transcript ? await sh($, 'd="${1%.jsonl}/subagents"; [ -d "$d" ] && echo "$d/*.jsonl"', [transcript]) : '',
   })
   const piped = await $.process.run(['pbcopy'], { stdin: text, timeoutMs: 5_000 }).catch(() => null)
   const isCopied = piped?.exitCode === 0 || (await $.ui.copy({ text })).isCopied
