@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1
+
+- `⧉ ref`: the copied `jq` line keeps a long session's first message (the original ask) before its newest ~36k characters, where it kept only the tail, and marks a pasted image as `[image]` instead of dropping it.
+
 ## 0.13.0
 
 - `copyRef` (off by default): a `⧉ ref` button on the band copies a pointer to this session for another agent: its id, transcript path, cwd and branch, and a `jq` line that reads the dialogue without tool output. Pressing it starts no turn and adds nothing to the transcript, so it works while a turn runs.

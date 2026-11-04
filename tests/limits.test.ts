@@ -846,7 +846,7 @@ test('copyRef draws a button that copies a pointer to the session, with no turn,
       surface,
       ['session_id: abc12345-0000', 'transcript: /h/.claude/projects/-w/abc12345-0000.jsonl (20 KB)  -- JSONL, one event per line; type user|assistant, text in .message.content'],
     ])
-    expect([surface, copied]).toEqual([surface, expect.stringContaining("jq -r 'select((.type==\"user\"")])
+    expect([surface, copied]).toEqual([surface, expect.stringContaining("jq -rs '[.[] | select((.type==\"user\"")])
     expect([surface, toasts]).toEqual([surface, ['Session ref copied (abc12345)']])
     await ui.unmount()
   }
