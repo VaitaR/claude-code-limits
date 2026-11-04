@@ -75,7 +75,7 @@ In `/config`, or under `pluginConfigs["limits"].options` in `settings.json`:
 | `costCommand` | empty | a command that prints the session's cost split as JSON; it is split on spaces into arguments, without quoting |
 | `quotaPoll` | `off` | `5m` or `15m`: one of your sessions asks the server for your 5h/7d quota that often, as `/usage` does, so the band stays current while every session is idle and counts use from claude.ai or another machine. Readings otherwise arrive only with a response |
 | `quotaLog` | empty | a file (`~/` for your home) each poll's answer is appended to, one JSON line: `{"at": …, "source": "poll", "five_hour": {"pct": 10, "resetsAt": …}, "seven_day": {…}}`, times in epoch ms. Needs `quotaPoll`; for matching quota against your own cost data |
-| `copyRef` | `false` | draws a `⧉ ref` button that copies a pointer to this session for another agent (Codex, another Claude session): its id, transcript path and size, cwd and branch, and a `jq` line that prints the dialogue without tool output. Pressing it starts no turn and adds nothing to the transcript. Copies with `pbcopy` (macOS), else Claude Code's own clipboard path, which the desktop app does not take yet |
+| `copyRef` | `false` | draws a `⧉ ref` button that copies a three-line pointer to this session for another agent (Codex, another Claude session): its id, cwd and branch, and its transcript's path and size. Pressing it starts no turn and adds nothing to the transcript. Copies with `pbcopy` (macOS), else Claude Code's own clipboard path, which the desktop app does not take yet |
 
 <details>
 <summary><strong>The <code>costCommand</code> contract</strong></summary>
@@ -129,7 +129,7 @@ The plugin ships a skill, **`customize-limits`**, that knows where each threshol
 | your `costCommand`'s output, if you set one | `$.process.run` |
 | your plan's quota from the server, if you set `quotaPoll`: one request per period across all sessions, with your claude.ai login, which Claude Code attaches and the mod never sees; an API key or another provider sends none | `$.session.authorize()`, `$.http.fetch` of `https://api.anthropic.com/api/oauth/usage` |
 | your `quotaLog` file, if you set one: read and written back with each poll's line added | `$.fs` |
-| when you press `⧉ ref` (`copyRef`): this session's transcript path and size, subagent transcript folder, git branch; the result goes to your clipboard | `sh -c ls`/`wc -c`/`git branch --show-current`, `pbcopy` via `$.process.run`; `$.ui.copy` |
+| when you press `⧉ ref` (`copyRef`): this session's transcript path and size, git branch; the result goes to your clipboard | `sh -c ls`/`wc -c`/`git branch --show-current`, `pbcopy` via `$.process.run`; `$.ui.copy` |
 
 It makes **no** network requests unless you set `quotaPoll`, and calls no model; your `costCommand` runs as you wrote it. State lives in session atoms and ends with the session, except the quota file, which holds only the readings of the windows still open. `claude plugin validate .` prints exactly what it hooks and calls.
 

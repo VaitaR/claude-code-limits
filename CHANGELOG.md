@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.2
+
+- `⧉ ref` copies three lines: the session id with its cwd and branch, the transcript's path and size, and how to tell the dialogue from tool output. The ready-made `jq` and `rg` lines and the subagent folder are gone: agents read the JSONL unaided, and they made the paste long.
+
 ## 0.13.1
 
 - `⧉ ref`: the copied `jq` line keeps a long session's first message (the original ask) before its newest ~36k characters, where it kept only the tail, and marks a pasted image as `[image]` instead of dropping it.
