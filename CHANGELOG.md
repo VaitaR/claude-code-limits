@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.0
+
+- `copyRef` (off by default): a `⧉ ref` button on the band copies a pointer to this session for another agent: its id, transcript path, cwd and branch, and a `jq` line that reads the dialogue without tool output. Pressing it starts no turn and adds nothing to the transcript, so it works while a turn runs.
+
 ## 0.12.0
 
 - `quotaLog`: a file each `quotaPoll` answer is appended to as one JSON line (`at`, `source`, then `pct` and `resetsAt` per window), to match the quota against your own cost and token data. Empty by default.
