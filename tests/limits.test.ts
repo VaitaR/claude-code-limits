@@ -278,6 +278,21 @@ test('a measurement without rate limits leaves the band quotas in place', async 
   }
 })
 
+test('a context past the stored compaction window reads the window again', async ($, on) => {
+  engine(on)
+  let raw = 180_000
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 1_000, window: 1_000_000, percent: 0, breakdown: { rawMaxTokens: raw } }, rateLimits: [] } as never }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  await new Promise(r => setTimeout(r, 0))
+  raw = 263_000
+  await $.session.measure({ context: { tokens: 219_000, window: 1_000_000, percent: 22 }, rateLimits: [], changed: ['context'] })
+  const ui = await $.ui.mount({ ...band(120), surface: 'desktop' })
+  expect(await ui.find({ text: /^ 83%$/ })).toBeDefined()
+  await ui.unmount()
+})
+
 test('the band shows the session cost, and its hover adds what the last turn cost', async ($, on) => {
   engine(on)
   let usd = 2
