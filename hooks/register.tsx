@@ -371,8 +371,12 @@ export const register: Register = (on, options) => {
       limits: newestLimits(fresh, newestLimits(read, normalize(DEFAULT_USAGE, x).limits)),
     }))
     if (fresh.length > 0) syncSoon($)
-    // A model switch changes the window; the compaction window follows it.
-    if (before.window !== e.context.window) await readCompactWindow($)
+    // A model switch changes the window; the compaction window follows it. Context past the stored
+    // compaction window means that reading is stale: the engine compacts before reaching it.
+    const tokens = e.context.tokens ?? 0
+    if (before.window !== e.context.window || (before.compactWindow !== null && tokens > before.compactWindow)) {
+      await readCompactWindow($)
+    }
     return next(e)
   })
 
