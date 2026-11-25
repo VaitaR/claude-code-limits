@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.4
+
+- The band no longer drops out of the desktop app. Its countdowns ran in a surface frame the app often failed to load (a 10-second wait, then a torn-down frame), which took the band with it. There the band now draws them as text and redraws itself every 15 seconds; a terminal keeps the ticking countdowns. A countdown that fails on any surface falls back to text until reload.
+
 ## 0.13.3
 
 - `ctx` re-reads the compaction window once the context passes the stored one. It was read only at session start and on a model switch, so a window read low at start (180k against a 263k `autoCompactWindow`) showed a session past 100% that was not.

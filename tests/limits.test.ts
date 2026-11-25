@@ -246,6 +246,8 @@ test('the band shows a live cache as a dot and minutes, cold once the TTL passes
     const ui = await $.ui.mount({ ...band(120), surface })
     expect([surface, await ui.find({ text: /^○ cold$/ })]).toEqual([surface, undefined])
     expect([surface, (await ui.find({ key: 'band-cache' })) ?? (await ui.find({ text: /^● 48m$/ }))]).toEqual([surface, expect.anything()])
+    // The desktop app's countdown frame fails to load often enough to empty the band: text there.
+    if (surface === 'desktop') expect([await ui.find({ key: 'band-cache' }), await ui.find({ text: /^● 48m$/ })]).toEqual([undefined, expect.anything()])
     expect([surface, await ui.find({ text: /^cache · warm until \d\d:\d\d \(1h TTL\)$/ })]).toEqual([surface, expect.anything()])
     await ui.unmount()
     // While a turn runs, its requests keep the cache warm: no countdown.
