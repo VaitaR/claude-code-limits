@@ -64,6 +64,8 @@ declare module 'claude-code' {
       split: CostSplit | null
       /** The person's prompts since load or /clear, oldest first, the last PROMPTS_KEPT. */
       prompts: LastPrompt[]
+      /** Surfaces a countdown `Client` failed on (`ui.fault`): the band draws plain text there until reload. */
+      clientFaults: string[]
     }
   }
 }
