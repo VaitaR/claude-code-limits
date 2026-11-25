@@ -29,8 +29,8 @@ findings:
     end_line: 463
     claim: "A terminal countdown fault freezes healthy countdowns — . If the terminal’s `band-reset-five_hour` client faults while the cache is warm, the `ui.fault` handler records the entire surface at line 442. The engine’s redraw then replaces the healthy cache client with a text snapshot at lines 542–546, but starts no redraw timer for the terminal. In an idle session with quota polling off and unchanged quota readings, that snapshot can keep showing a warm cache after its TTL expires"
     fingerprint: "6f6d3b1091e0"
-    disposition: "unverified"
-    disposition_note: ""
+    disposition: "accepted"
+    disposition_note: "fixed in 03b999c"
   - id: "F2"
     severity: "P2"
     file: "hooks/register.tsx"
@@ -38,8 +38,8 @@ findings:
     end_line: 463
     claim: "Hot reload does not restore countdown clients — . After a terminal countdown fault is recorded at line 442, the session atom survives a plugin hot reload. The new module reads the old fault marker and still omits the client, contrary to `CHANGELOG.md:5`’s “until reload.”"
     fingerprint: "17eb6d793b2a"
-    disposition: "unverified"
-    disposition_note: ""
+    disposition: "accepted"
+    disposition_note: "fixed in 03b999c"
   - id: "F3"
     severity: "P3"
     file: "hooks/register.tsx"
@@ -47,8 +47,8 @@ findings:
     end_line: 442
     claim: "The new fault-event data source is undocumented — . On a countdown fault, the hook reads the module path and surface from `ui.fault`. The governing instructions require new data sources to be listed in the README’s “What it can reach” table, which does not list this event"
     fingerprint: "677feddceab3"
-    disposition: "unverified"
-    disposition_note: ""
+    disposition: "accepted"
+    disposition_note: "fixed in 03b999c"
 ---
 
 # codex review — fix/desktop-band-text
