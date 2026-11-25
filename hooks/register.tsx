@@ -115,9 +115,10 @@ async function seedFromTranscript($: EngineInterface) {
 const QUOTA_TICK_MS = 30_000
 let quotaTick: { cancel: () => void } | null = null
 // The desktop app's countdown frame often fails to load (10s waits, torn-down frames in its log) and the
-// band vanished with it; there the band draws text and redraws itself on this timer instead.
-const DESKTOP_REDRAW_MS = 15_000
-let desktopTick: { cancel: () => void } | null = null
+// band vanished with it; there, and on a surface whose countdown faulted, the band draws text and redraws
+// itself on this timer instead.
+const TEXT_REDRAW_MS = 15_000
+let textTick: { cancel: () => void } | null = null
 /** The last reading the engine handed this process, stamped or not: what `freshLimits` compares against. */
 let engineLimits: Limit[] = []
 /** When this process last got a response, and the latest of those a measurement has looked at. */
@@ -304,8 +305,10 @@ export const register: Register = (on, options) => {
     pollSoon($, cfg)
     // A hot reload loads the module again and cancels its timers; session.start runs for the new one.
     quotaTick?.cancel()
-    desktopTick?.cancel()
-    desktopTick = null
+    textTick?.cancel()
+    textTick = null
+    // A reload is the retry of a countdown that faulted: its marker, an atom, would outlive the module.
+    await update($, clientFaults, () => [])
     quotaTick = $.clock.every(QUOTA_TICK_MS, () => (syncSoon($), pollSoon($, cfg)))
     void refreshSplit($, cfg).catch(() => undefined)
     return next(e)
@@ -439,7 +442,7 @@ export const register: Register = (on, options) => {
   // error text in its place; the engine redraws after this hook, and the band then draws plain text there.
   on('ui.fault', async ($, e, next) => {
     if (e.module.endsWith('countdown.tsx')) {
-      await update($, clientFaults, x => (Array.isArray(x) && x.includes(e.surface) ? x : [...(Array.isArray(x) ? x : []), e.surface]))
+      await update($, clientFaults, x => (listOf<string>(x).includes(e.surface) ? listOf<string>(x) : [...listOf<string>(x), e.surface]))
     }
     return next(e)
   })
@@ -458,9 +461,9 @@ export const register: Register = (on, options) => {
       getPrompts($),
       read($, clientFaults),
     ])
-    const desktop = e.surface === 'desktop'
-    if (desktop && !desktopTick) desktopTick = $.clock.every(DESKTOP_REDRAW_MS, () => $.ui.invalidate('ui.render'))
-    const hasClient = !desktop && 'Client' in els && !(Array.isArray(faults) && faults.includes(e.surface))
+    const hasClient = e.surface !== 'desktop' && 'Client' in els && !listOf<string>(faults).includes(e.surface)
+    // Re-armed by each drawing, so it stops once no band is drawn.
+    if (!hasClient && !textTick) textTick = $.clock.after(TEXT_REDRAW_MS, () => ((textTick = null), $.ui.invalidate('ui.render')))
     const lp = ps[ps.length - 1] ?? null
     const cx = contextOf(u)
     const sentAt = numOr(cache, 0)

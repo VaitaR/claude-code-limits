@@ -123,6 +123,7 @@ The plugin ships a skill, **`customize-limits`**, that knows where each threshol
 | a subagent's tool calls: the tool and the argument that names its target (a Bash call's description or command, a file's name, a search pattern) | `tool.call` |
 | the text of your own prompts: typed, from the desktop app or Remote Control, never a notification's or another plugin's | `prompt.submit` |
 | compactions | `session.compact` |
+| a countdown that failed to load or draw on a surface (its module and the surface's name), so the band draws text there until the mod reloads | `ui.fault` |
 | subagent spawns and ends: type, description, model | `agent.spawn`, `turn.complete` |
 | the tail of this session's transcript, at session start while no request or prompt has been seen yet, to start the cache clock, show the last prompt Claude Code recorded and the context of the last response | `sh -c tail -c 400000 ~/.claude/projects/*/<session id>.jsonl` |
 | the latest 5h/7d readings of every session under the same config directory, and this session's own into it, every 30 s and at each reading | `$.fs` on `<config dir>/state/limits/quota.json` (`CLAUDE_CONFIG_DIR`, else `~/.claude`) |
